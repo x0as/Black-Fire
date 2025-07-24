@@ -27,7 +27,11 @@ let memory = {
   giveaways: {},
   model: 'gemini-pro',
 };
-client.login(TOKEN);
+
+// Persistent memory file
+const MEMORY_FILE = './memory.json';
+
+function loadMemory() {
   try {
     if (fs.existsSync(MEMORY_FILE)) {
       const data = fs.readFileSync(MEMORY_FILE, 'utf8');
@@ -36,6 +40,7 @@ client.login(TOKEN);
   } catch (e) {
     console.error('Failed to load memory:', e);
   }
+}
 
 function saveMemory() {
   try {
@@ -44,6 +49,7 @@ function saveMemory() {
     console.error('Failed to save memory:', e);
   }
 }
+
 loadMemory();
 
 // Ensure entrants are always Sets after loading from memory
