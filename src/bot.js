@@ -679,8 +679,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 // Track messages for leaderboards, randomly send fun messages, and AI replies
 // --- Gemini AI Chat Integration ---
 import axios from 'axios';
-import dotenv from 'dotenv';
-dotenv.config();
 
 const GEMINI_API_KEY = process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
