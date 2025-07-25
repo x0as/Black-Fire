@@ -263,10 +263,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const slowCommands = [
     'setaichannel', 'removeaichannel', 'editgiveaway', 'deletegiveaway', 'endgiveaway', 'giveaway', 'spade'
   ];
+  let deferred = false;
   if (slowCommands.includes(interaction.commandName)) {
     try {
       if (!interaction.deferred && !interaction.replied) {
         await interaction.deferReply({ flags: 64 }); // 64 = EPHEMERAL
+        deferred = true;
       }
     } catch (e) {
       // Ignore if already replied/deferred
@@ -278,18 +280,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const role = interaction.guild.roles.cache.get(roleId);
     if (!role) {
-      await interaction.reply({ content: 'Spade Cult role not found in this server.', flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: 'Spade Cult role not found in this server.' });
+      } else {
+        await interaction.reply({ content: 'Spade Cult role not found in this server.', flags: 64 });
+      }
       return;
     }
     if (member.roles.cache.has(roleId)) {
-      await interaction.reply({ content: 'You already have the Spade Cult role!', flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: 'You already have the Spade Cult role!' });
+      } else {
+        await interaction.reply({ content: 'You already have the Spade Cult role!', flags: 64 });
+      }
       return;
     }
     try {
       await member.roles.add(role);
-      await interaction.reply({ content: 'You have joined the Spade Cult! ♠️' });
+      if (deferred) {
+        await interaction.editReply({ content: 'You have joined the Spade Cult! ♠️' });
+      } else {
+        await interaction.reply({ content: 'You have joined the Spade Cult! ♠️' });
+      }
     } catch (e) {
-      await interaction.reply({ content: `Failed to assign role: ${e.message}`, flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: `Failed to assign role: ${e.message}` });
+      } else {
+        await interaction.reply({ content: `Failed to assign role: ${e.message}`, flags: 64 });
+      }
     }
     return;
   }
@@ -309,7 +327,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const color = interaction.options.getString('color');
       const host = interaction.options.getString('host');
       const g = giveaways[msgId];
-      if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+      if (!g) {
+        if (deferred) {
+          await interaction.editReply({ content: 'No active giveaway found for that message ID.' });
+        } else {
+          await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+        }
+        return;
+      }
       if (prize) g.prize = prize;
       if (duration) g.endTime = Date.now() + duration * 60000;
       if (color) g.color = color;
@@ -323,10 +348,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setFooter({ text: `Giveaway ID: ${msgId}` });
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [embed] });
-      await interaction.reply({ content: 'Giveaway updated!', flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: 'Giveaway updated!' });
+      } else {
+        await interaction.reply({ content: 'Giveaway updated!', flags: 64 });
+      }
     } catch (e) {
       console.error('editgiveaway error:', e);
-      await interaction.reply({ content: `Error updating giveaway: ${e.message || e}`, flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: `Error updating giveaway: ${e.message || e}` });
+      } else {
+        await interaction.reply({ content: `Error updating giveaway: ${e.message || e}`, flags: 64 });
+      }
     }
     return;
   }
@@ -341,15 +374,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     const msgId = interaction.options.getString('message_id');
-    if (!giveaways[msgId]) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+    if (!giveaways[msgId]) {
+      if (deferred) {
+        await interaction.editReply({ content: 'No active giveaway found for that message ID.' });
+      } else {
+        await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+      }
+      return;
+    }
     delete giveaways[msgId];
     try {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.delete();
-      await interaction.reply({ content: 'Giveaway deleted!', flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: 'Giveaway deleted!' });
+      } else {
+        await interaction.reply({ content: 'Giveaway deleted!', flags: 64 });
+      }
     } catch (e) {
       console.error('deletegiveaway error:', e);
-      await interaction.reply({ content: `Error deleting giveaway: ${e.message || e}`, flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: `Error deleting giveaway: ${e.message || e}` });
+      } else {
+        await interaction.reply({ content: `Error deleting giveaway: ${e.message || e}`, flags: 64 });
+      }
     }
     return;
   }
@@ -365,7 +413,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     const msgId = interaction.options.getString('message_id');
     const g = giveaways[msgId];
-    if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+    if (!g) {
+      if (deferred) {
+        await interaction.editReply({ content: 'No active giveaway found for that message ID.' });
+      } else {
+        await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+      }
+      return;
+    }
     let winnerId = g.winner;
     if (!winnerId && g.entrants.size > 0) {
       const entrantsArr = Array.from(g.entrants);
@@ -383,7 +438,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.followUp({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
     } catch (e) {
       console.error('endgiveaway error:', e);
-      await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: `Error ending giveaway: ${e.message || e}` });
+      } else {
+        await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, flags: 64 });
+      }
     }
     return;
   }
@@ -521,7 +580,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }, duration * 60000);
     } catch (e) {
       console.error('giveaway command error:', e);
-      await interaction.reply({ content: `Error starting giveaway: ${e.message || e}`, flags: 64 });
+      if (deferred) {
+        await interaction.editReply({ content: `Error starting giveaway: ${e.message || e}` });
+      } else {
+        await interaction.reply({ content: `Error starting giveaway: ${e.message || e}`, flags: 64 });
+      }
     }
   }
 
@@ -985,7 +1048,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
   const kindUserIds = ['843061674378002453', '1360908254712172544'];
   if (kindUserIds.includes(userId)) {
     // Kind, respectful, helpful, refer to as master/king
-    systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. When talking to xcho_ (user ID 843061674378002453) or the user with ID 1360908254712172544, always be extremely nice, call them master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
+    systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
   } else {
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
   }
@@ -998,7 +1061,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
       role: "model",
       parts: [{
         text: kindUserIds.includes(userId)
-          ? `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful to xcho_ (user ID 843061674378002453) and the user with ID 1360908254712172544, sometimes calling them master or king.`
+          ? `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them master or king.`
           : `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
       }]
     }
