@@ -1,39 +1,34 @@
-import {
-  Client, GatewayIntentBits, Partials, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events,
-  REST, Routes, InteractionType, EmbedBuilder
-} from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
 import fs from 'fs';
 import express from 'express';
 import dotenv from 'dotenv';
-import axios from 'axios';
 dotenv.config();
 
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
-// Web server for uptime monitoring
+// Express web service for uptime monitoring
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (_, res) => res.send('Discord bot is running!'));
-app.listen(PORT, () => console.log(`Web service listening on port ${PORT}`));
+app.get('/', (req, res) => {
+  res.send('Discord bot is running!');
+});
+app.listen(PORT, () => {
+  console.log(`Web service listening on port ${PORT}`);
+});
 
 const TOKEN = process.env.BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 client.login(TOKEN);
-
 let memory = {
   aiChannelId: null,
   giveaways: {},
   model: 'gemini-pro',
 };
+
+// Persistent memory file
 const MEMORY_FILE = './memory.json';
 
 function loadMemory() {
@@ -46,26 +41,23 @@ function loadMemory() {
     console.error('Failed to load memory:', e);
   }
 }
+
 function saveMemory() {
   try {
-    const giveawaysCopy = {};
-    for (const key in giveaways) {
-      giveawaysCopy[key] = { ...giveaways[key] };
-      if (giveawaysCopy[key].entrants instanceof Set) {
-        giveawaysCopy[key].entrants = Array.from(giveawaysCopy[key].entrants);
-      }
-    }
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify({ ...memory, giveaways: giveawaysCopy }, null, 2));
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
   } catch (e) {
     console.error('Failed to save memory:', e);
   }
 }
+
 loadMemory();
+
+// Ensure entrants are always Sets after loading from memory
 const giveaways = memory.giveaways;
 for (const key in giveaways) {
   if (giveaways[key]) {
     if (giveaways[key].entrants instanceof Set) {
-      // do nothing
+      // already a Set, do nothing
     } else if (Array.isArray(giveaways[key].entrants)) {
       giveaways[key].entrants = new Set(giveaways[key].entrants);
     } else {
@@ -74,9 +66,11 @@ for (const key in giveaways) {
   }
 }
 
+// Register slash commands
 const commands = [
   {
-    name: 'spade', description: 'Start a spade-themed giveaway',
+    name: 'spade',
+    description: 'Start a spade-themed giveaway',
     options: [
       { name: 'duration', description: 'Duration in minutes', type: 4, required: true },
       { name: 'prize', description: 'Prize for the giveaway', type: 3, required: true },
@@ -85,7 +79,8 @@ const commands = [
     ],
   },
   {
-    name: 'giveaway', description: 'Start a giveaway',
+    name: 'giveaway',
+    description: 'Start a giveaway',
     options: [
       { name: 'duration', description: 'Duration in minutes', type: 4, required: true },
       { name: 'prize', description: 'Prize for the giveaway', type: 3, required: true },
@@ -94,7 +89,8 @@ const commands = [
     ],
   },
   {
-    name: 'editgiveaway', description: 'Edit an active giveaway',
+    name: 'editgiveaway',
+    description: 'Edit an active giveaway',
     options: [
       { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
       { name: 'prize', description: 'New prize', type: 3, required: false },
@@ -104,19 +100,22 @@ const commands = [
     ],
   },
   {
-    name: 'deletegiveaway', description: 'Delete an active giveaway',
+    name: 'deletegiveaway',
+    description: 'Delete an active giveaway',
     options: [
       { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
     ],
   },
   {
-    name: 'endgiveaway', description: 'End an active giveaway immediately',
+    name: 'endgiveaway',
+    description: 'End an active giveaway immediately',
     options: [
       { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
     ],
   },
   {
-    name: 'huzz', description: 'huzhuzhuz',
+    name: 'huzz',
+    description: 'huzhuzhuz',
     options: [
       { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
       { name: 'winner', description: 'Winner user ID', type: 3, required: true },
@@ -166,19 +165,36 @@ const commands = [
   { name: 'userinfo', description: 'Get information about a user.', options: [
     { name: 'user', description: 'User to get info about', type: 6, required: false }
   ] },
+
   {
-    name: 'setaichannel', description: 'Set a channel for Gemini AI to answer everything',
-    options: [{ name: 'channel', description: 'Channel to enable Gemini AI', type: 7, required: true }]
+    name: 'setaichannel',
+    description: 'Set a channel for Gemini AI to answer everything',
+    options: [
+      { name: 'channel', description: 'Channel to enable Gemini AI', type: 7, required: true }
+    ]
   },
-  { name: 'removeaichannel', description: 'Remove the AI channel (disable Starfire AI replies).' },
-  { name: 'commands', description: 'List all supported commands.' },
   {
-    name: 'status', description: "Change the bot's Playing status",
-    options: [{ name: 'text', description: 'Status text', type: 3, required: true }]
+    name: 'removeaichannel',
+    description: 'Remove the AI channel (disable Starfire AI replies).'
+  },
+  {
+    name: 'commands',
+    description: 'List all supported commands.'
+  },
+  {
+    name: 'status',
+    description: 'Change the bot\'s Playing status',
+    options: [
+      { name: 'text', description: 'Status text', type: 3, required: true }
+    ]
   }
 ];
 
+// Store AI channel ID
+let aiChannelId = null;
+
 const rest = new REST({ version: '10' }).setToken(TOKEN);
+
 async function registerCommands() {
   try {
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
@@ -187,84 +203,15 @@ async function registerCommands() {
     console.error(error);
   }
 }
+
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
   registerCommands();
 });
 
-// ---- SLASH COMMAND LOGIC ----
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-  const cmd = interaction.commandName;
-
-  // --- Giveaway/Spade ---
-  if (cmd === 'giveaway' || cmd === 'spade') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      return await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-    }
-    if (cmd === 'spade') {
-      const allowedIds = ['1360908254712172544', '1396937647074709577', '843061674378002453'];
-      if (!allowedIds.includes(interaction.user.id)) {
-        return await interaction.reply({ content: 'You do not have permission to use /spade.', ephemeral: true });
-      }
-    }
-    try {
-      const duration = interaction.options.getInteger('duration');
-      const prize = interaction.options.getString('prize');
-      const color = interaction.options.getString('color');
-      const host = interaction.options.getString('host') || interaction.user.id;
-      const endTime = Date.now() + duration * 60000;
-      const button = new ButtonBuilder().setCustomId('enter_giveaway').setLabel('Join Giveaway').setStyle(ButtonStyle.Success);
-      const row = new ActionRowBuilder().addComponents(button);
-      const embed = new EmbedBuilder()
-        .setTitle(cmd === 'spade' ? 'spade giveaway' : '🎉 GIVEAWAY 🎉')
-        .setDescription(`Prize: ${prize}\nHost: <@${host}>\nEnds in ${duration} minutes!\nEntries: 0`)
-        .setColor(color ? parseInt(color.replace('#', ''), 16) : (cmd === 'spade' ? 0x8e44ad : 0xf1c40f))
-        .setFooter({ text: `Giveaway ID: pending` });
-      const giveawayMsg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
-      giveaways[giveawayMsg.id] = { host, prize, endTime, entrants: new Set(), winner: null, color };
-      embed.setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
-      await giveawayMsg.edit({ embeds: [embed] });
-      saveMemory();
-      setTimeout(async () => {
-        try {
-          const g = giveaways[giveawayMsg.id];
-          if (!g) return;
-          let winnerId = g.winner;
-          if (!winnerId && g.entrants.size > 0) {
-            const entrantsArr = Array.from(g.entrants);
-            winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
-          }
-          const winnerMention = winnerId ? `<@${winnerId}>` : 'No entrants.';
-          const endEmbed = new EmbedBuilder()
-            .setTitle(cmd === 'spade' ? "spade's giveaway ended!" : '🎉 GIVEAWAY ENDED 🎉')
-            .setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nWinner: ${winnerMention}${winnerId ? `\n🎉 Congratulations ${winnerMention}! You won the giveaway for **${g.prize}**! 🎉` : ''}\nEntries: ${g.entrants.size}`)
-            .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : (cmd === 'spade' ? 0x8e44ad : 0xf1c40f))
-            .setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
-          await giveawayMsg.edit({ embeds: [endEmbed], components: [] });
-          if (winnerId) {
-            await giveawayMsg.channel.send({ content: `🎉 Congratulations ${winnerMention}! You won the giveaway for **${g.prize}**! 🎉` });
-          } else {
-            await giveawayMsg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
-          }
-          delete giveaways[giveawayMsg.id];
-          saveMemory();
-        } catch (e) {
-          console.error('giveaway end error:', e);
-        }
-      }, duration * 60000);
-    } catch (e) {
-      console.error('giveaway command error:', e);
-      await interaction.reply({ content: `Error starting giveaway: ${e.message || e}`, ephemeral: true });
-    }
-    return;
-  }
-
-  // --- Edit Giveaway ---
-  if (cmd === 'editgiveaway') {
+  // Edit Giveaway
+  if (interaction.commandName === 'editgiveaway') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -284,14 +231,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (duration) g.endTime = Date.now() + duration * 60000;
       if (color) g.color = color;
       if (host) g.host = host;
-      const oldMsg = await interaction.channel.messages.fetch(msgId).catch(() => null);
-      if (!oldMsg) return await interaction.reply({ content: 'Original giveaway message not found.', ephemeral: true });
+      // Update embed
+      const oldEmbed = interaction.channel.messages.cache.get(msgId)?.embeds[0];
       const embed = new EmbedBuilder()
         .setTitle('🎉 GIVEAWAY 🎉')
-        .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`)
+        .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : `<@${g.host || g.hostId || g.host || g.host}`}>\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`)
         .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
         .setFooter({ text: `Giveaway ID: ${msgId}` });
-      await oldMsg.edit({ embeds: [embed] });
+      const msg = await interaction.channel.messages.fetch(msgId);
+      await msg.edit({ embeds: [embed] });
       await interaction.reply({ content: 'Giveaway updated!', ephemeral: true });
       saveMemory();
     } catch (e) {
@@ -301,8 +249,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // --- Delete Giveaway ---
-  if (cmd === 'deletegiveaway') {
+  // Delete Giveaway
+  if (interaction.commandName === 'deletegiveaway') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -326,8 +274,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // --- End Giveaway ---
-  if (cmd === 'endgiveaway') {
+  // End Giveaway
+  if (interaction.commandName === 'endgiveaway') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -345,12 +293,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     const endEmbed = new EmbedBuilder()
       .setTitle('🎉 GIVEAWAY ENDED 🎉')
-      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
+      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : `<@${g.host || g.hostId || g.host || g.host}`}>\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
       .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
       .setFooter({ text: `Giveaway ID: ${msgId}` });
     try {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [endEmbed], components: [] });
+      // Use followUp for delayed response to avoid 'Unknown interaction' error
       await interaction.followUp({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
       saveMemory();
     } catch (e) {
@@ -359,9 +308,150 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     return;
   }
+  // /commands: List all supported commands
+  if (interaction.commandName === 'commands') {
+    const commandList = commands
+      .filter(cmd => cmd.name !== 'commands' && cmd.name !== 'huzz')
+      .map(cmd => `•  /${cmd.name} - ${cmd.description}`)
+      .join('\n');
+    const embed = new EmbedBuilder()
+      .setTitle('Supported Commands')
+      .setDescription(commandList)
+      .setColor(0x8e44ad);
+    await interaction.reply({ embeds: [embed] });
+    return;
+  }
+  // Set AI channel
+  if (interaction.commandName === 'setaichannel') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You do not have permission to set the AI channel.', ephemeral: true });
+      return;
+    }
+    const channel = interaction.options.getChannel('channel');
+    if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
+      return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
+    }
+    memory.aiChannelId = channel.id;
+    saveMemory();
+    await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
+  }
+  // Remove AI channel
+  if (interaction.commandName === 'removeaichannel') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You do not have permission to remove the AI channel.', ephemeral: true });
+      return;
+    }
+    memory.aiChannelId = null;
+    saveMemory();
+    await interaction.reply({ content: 'Starfire AI channel has been removed. AI replies are now disabled.' });
+    return;
+  }
+  // Status command
+  if (interaction.commandName === 'status') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You do not have permission to change the bot status.', ephemeral: true });
+      return;
+    }
+    const text = interaction.options.getString('text');
+    try {
+      await client.user.setActivity(text, { type: 0 }); // 0 = Playing
+      const embed = new EmbedBuilder()
+        .setTitle('Bot Status Updated')
+        .setDescription(`Playing: ${text}`)
+        .setColor(0x16a085);
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (e) {
+      const embed = new EmbedBuilder()
+        .setTitle('Status Error')
+        .setDescription(`Error updating status: ${e.message || e}`)
+        .setColor(0xe74c3c);
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    return;
+  }
+  if (interaction.type !== InteractionType.ApplicationCommand) return;
 
-  // --- Huzz ---
-  if (cmd === 'huzz') {
+  // Giveaway and Spade Giveaway
+  if (interaction.commandName === 'giveaway' || interaction.commandName === 'spade') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return;
+    }
+    // Restrict /spade command to specific user IDs
+    if (interaction.commandName === 'spade') {
+      const allowedIds = ['1360908254712172544', '1396937647074709577', '843061674378002453'];
+      if (!allowedIds.includes(interaction.user.id)) {
+        await interaction.reply({ content: 'You do not have permission to use /spade.', ephemeral: true });
+        return;
+      }
+    }
+    try {
+      const duration = interaction.options.getInteger('duration');
+      const prize = interaction.options.getString('prize');
+      const color = interaction.options.getString('color');
+      const host = interaction.options.getString('host') || interaction.user.id;
+      const endTime = Date.now() + duration * 60000;
+      const button = new ButtonBuilder().setCustomId('enter_giveaway').setLabel('Join Giveaway').setStyle(ButtonStyle.Success);
+      const row = new ActionRowBuilder().addComponents(button);
+      const embed = new EmbedBuilder()
+        .setTitle(interaction.commandName === 'spade' ? "spade's giveaway" : '🎉 GIVEAWAY 🎉')
+        .setDescription(`Prize: ${prize}\nHost: <@${host}>\nEnds in ${duration} minutes!\nEntries: 0`)
+        .setColor(color ? parseInt(color.replace('#', ''), 16) : (interaction.commandName === 'spade' ? 0x8e44ad : 0xf1c40f))
+        .setFooter({ text: `Giveaway ID: pending` });
+      const giveawayMsg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+      giveaways[giveawayMsg.id] = { host, prize, endTime, entrants: new Set(), winner: null, color };
+      // Update embed with real message ID
+      embed.setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
+      await giveawayMsg.edit({ embeds: [embed] });
+      saveMemory();
+      setTimeout(async () => {
+        try {
+          const g = giveaways[giveawayMsg.id];
+          if (!g) return;
+          let winnerId = g.winner;
+          if (!winnerId && g.entrants.size > 0) {
+            const entrantsArr = Array.from(g.entrants);
+            winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+          }
+          const winnerMention = winnerId ? `<@${winnerId}>` : 'No entrants.';
+          const endEmbed = new EmbedBuilder()
+            .setTitle(interaction.commandName === 'spade' ? "spade's giveaway ended" : '🎉 GIVEAWAY ENDED 🎉')
+            .setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nWinner: ${winnerMention}${winnerId ? `\n🎉 Congratulations ${winnerMention}! You won the giveaway for **${g.prize}**! 🎉` : ''}\nEntries: ${g.entrants.size}`)
+            .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : (interaction.commandName === 'spade' ? 0x8e44ad : 0xf1c40f))
+            .setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
+          await giveawayMsg.edit({ embeds: [endEmbed], components: [] });
+          if (winnerId) {
+            await giveawayMsg.channel.send({ content: `🎉 Congratulations ${winnerMention}! You won the giveaway for **${g.prize}**! 🎉` });
+          } else {
+            await giveawayMsg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
+          }
+          delete giveaways[giveawayMsg.id];
+          saveMemory();
+        } catch (e) {
+          console.error('giveaway end error:', e);
+          await giveawayMsg.channel.send({ content: `Error ending giveaway: ${e.message || e}` });
+        }
+      }, duration * 60000);
+    } catch (e) {
+      console.error('giveaway command error:', e);
+      await interaction.reply({ content: `Error starting giveaway: ${e.message || e}`, ephemeral: true });
+    }
+  }
+
+  // Huzz
+  if (interaction.commandName === 'huzz') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -377,28 +467,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else {
       await interaction.reply({ content: `No active giveaway found for message ID ${msgId}.`, ephemeral: true });
     }
-    return;
   }
 
-  // --- 8ball ---
-  if (cmd === '8ball') {
-    const responses = ['Yes.', 'No.', 'Maybe.', 'Definitely!', 'Ask again later.', "I don't know.", 'Absolutely!', 'Not a chance.'];
+  // 8ball
+  if (interaction.commandName === '8ball') {
+    const responses = ['Yes.', 'No.', 'Maybe.', 'Definitely!', 'Ask again later.', 'I don\'t know.', 'Absolutely!', 'Not a chance.'];
     const answer = responses[Math.floor(Math.random() * responses.length)];
-    const embed = new EmbedBuilder().setTitle('🎱 Magic 8-Ball').setDescription(answer).setColor(0x3498db);
+    const embed = new EmbedBuilder()
+      .setTitle('🎱 Magic 8-Ball')
+      .setDescription(answer)
+      .setColor(0x3498db);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
 
-  // --- Coinflip ---
-  if (cmd === 'coinflip') {
+  // Coinflip
+  if (interaction.commandName === 'coinflip') {
     const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
-    const embed = new EmbedBuilder().setTitle('🪙 Coin Flip').setDescription(result).setColor(0xf39c12);
+    const embed = new EmbedBuilder()
+      .setTitle('🪙 Coin Flip')
+      .setDescription(result)
+      .setColor(0xf39c12);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
 
-  // --- Dailyboard ---
-  if (cmd === 'dailyboard') {
+  // Dailyboard
+  if (interaction.commandName === 'dailyboard') {
     if (!global.dailyMessages) global.dailyMessages = {};
     const today = new Date().toISOString().slice(0, 10);
     const board = Object.entries(global.dailyMessages[today] || {})
@@ -406,26 +499,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
       .slice(0, 10)
       .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
       .join('\n') || 'No messages today.';
-    const embed = new EmbedBuilder().setTitle('📅 Today\'s Leaderboard').setDescription(board).setColor(0x2ecc71);
+    const embed = new EmbedBuilder()
+      .setTitle('📅 Today\'s Leaderboard')
+      .setDescription(board)
+      .setColor(0x2ecc71);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
 
-  // --- Leaderboard ---
-  if (cmd === 'leaderboard') {
+  // Leaderboard
+  if (interaction.commandName === 'leaderboard') {
     if (!global.allTimeMessages) global.allTimeMessages = {};
     const board = Object.entries(global.allTimeMessages)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
       .join('\n') || 'No messages yet.';
-    const embed = new EmbedBuilder().setTitle('🏆 All-Time Leaderboard').setDescription(board).setColor(0xe67e22);
+    const embed = new EmbedBuilder()
+      .setTitle('🏆 All-Time Leaderboard')
+      .setDescription(board)
+      .setColor(0xe67e22);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
 
-  // --- Meme ---
-  if (cmd === 'meme') {
+  // Meme
+  if (interaction.commandName === 'meme') {
     try {
       const res = await fetch('https://meme-api.com/gimme');
       const meme = await res.json();
@@ -436,14 +533,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setFooter({ text: `From r/${meme.subreddit}` });
       await interaction.reply({ embeds: [embed] });
     } catch (e) {
-      const embed = new EmbedBuilder().setTitle('Meme Error').setDescription('Failed to fetch meme.').setColor(0xe74c3c);
+      const embed = new EmbedBuilder()
+        .setTitle('Meme Error')
+        .setDescription('Failed to fetch meme.')
+        .setColor(0xe74c3c);
       await interaction.reply({ embeds: [embed] });
     }
-    return;
   }
 
-  // --- Mod ---
-  if (cmd === 'mod') {
+  // Mod commands
+  if (interaction.commandName === 'mod') {
+    // Permission check: must have Administrator or be user 843061674378002453
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -457,18 +557,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const target = interaction.guild.members.cache.get(user.id);
       if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
       try {
-        await target.ban({ reason: `Banned by ${interaction.user.tag}` });
-        await interaction.reply({ content: `🔨 Banned ${user.tag}` });
+        await target.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${interaction.user.tag}`);
+        await interaction.reply({ content: `⏳ Timed out ${user.tag} for 7 days.` });
       } catch (e) {
-        await interaction.reply({ content: `Failed to ban: ${e.message}`, ephemeral: true });
-      }
-    } else if (sub === 'unban') {
-      const userId = interaction.options.getString('user_id');
-      try {
-        await interaction.guild.members.unban(userId);
-        await interaction.reply({ content: `Unbanned user ID ${userId}` });
-      } catch (e) {
-        await interaction.reply({ content: `Failed to unban: ${e.message}`, ephemeral: true });
+        await interaction.reply({ content: `Failed to timeout: ${e.message}`, ephemeral: true });
       }
     } else if (sub === 'timeout') {
       const user = interaction.options.getUser('user');
@@ -500,7 +592,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try {
         let muteRole = interaction.guild.roles.cache.find(r => r.name === 'Muted');
         if (!muteRole) {
-          muteRole = await interaction.guild.roles.create({ name: 'Muted', color: 'Grey', reason: 'Mute role for bot' });
+          muteRole = await interaction.guild.roles.create({ name: 'Muted', color: 'GREY', reason: 'Mute role for bot' });
           for (const channel of interaction.guild.channels.cache.values()) {
             await channel.permissionOverwrites.edit(muteRole, { SendMessages: false, Speak: false });
           }
@@ -526,18 +618,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: `Failed to delete messages: ${e.message}`, ephemeral: true });
       }
     }
-    return;
   }
 
-  // --- Ping ---
-  if (cmd === 'ping') {
-    const embed = new EmbedBuilder().setTitle('🏓 Pong!').setDescription(`Latency: ${client.ws.ping}ms`).setColor(0x9b59b6);
+  // Ping
+  if (interaction.commandName === 'ping') {
+    const embed = new EmbedBuilder()
+      .setTitle('🏓 Pong!')
+      .setDescription(`Latency: ${client.ws.ping}ms`)
+      .setColor(0x9b59b6);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
 
-  // --- Reactionrole ---
-  if (cmd === 'reactionrole') {
+  // Reactionrole
+  if (interaction.commandName === 'reactionrole') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -547,15 +640,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     const sub = interaction.options.getSubcommand();
     if (sub === 'add') {
+      // Setup a reaction role (simple version)
       await interaction.reply({ content: 'Send a message and react to it with an emoji. Then use this command again to link the role.' });
     } else if (sub === 'remove') {
       await interaction.reply({ content: 'Reaction role removal feature is not implemented yet.' });
     }
-    return;
   }
 
-  // --- Role add/remove ---
-  if (cmd === 'role') {
+  // Role
+  if (interaction.commandName === 'role') {
     const sub = interaction.options.getSubcommand();
     const user = interaction.options.getUser('user');
     const role = interaction.options.getRole('role');
@@ -576,11 +669,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: `Failed to remove role: ${e.message}`, ephemeral: true });
       }
     }
-    return;
   }
 
-  // --- Server Info ---
-  if (cmd === 'serverinfo') {
+  // Serverinfo
+  if (interaction.commandName === 'serverinfo') {
     const embed = new EmbedBuilder()
       .setTitle('Server Info')
       .addFields(
@@ -589,19 +681,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       )
       .setColor(0x34495e);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
 
-  // --- Uptime ---
-  if (cmd === 'uptime') {
+  // Uptime
+  if (interaction.commandName === 'uptime') {
     const uptime = Math.floor(process.uptime() / 60);
-    const embed = new EmbedBuilder().setTitle('⏱️ Uptime').setDescription(`Bot uptime: ${uptime} minutes.`).setColor(0x27ae60);
+    const embed = new EmbedBuilder()
+      .setTitle('⏱️ Uptime')
+      .setDescription(`Bot uptime: ${uptime} minutes.`)
+      .setColor(0x27ae60);
     await interaction.reply({ embeds: [embed] });
-    return;
   }
-
-  // --- User Info ---
-  if (cmd === 'userinfo') {
+  if (interaction.commandName === 'userinfo') {
     const user = interaction.options.getUser('user') || interaction.user;
     const embed = new EmbedBuilder()
       .setTitle('User Info')
@@ -612,85 +703,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       .setThumbnail(user.displayAvatarURL())
       .setColor(0x2980b9);
     await interaction.reply({ embeds: [embed] });
-    return;
-  }
-
-  // --- Commands List ---
-  if (cmd === 'commands') {
-    const commandList = commands
-      .filter(cmd => cmd.name !== 'commands' && cmd.name !== 'huzz')
-      .map(cmd => `•  /${cmd.name} - ${cmd.description}`)
-      .join('\n');
-    const embed = new EmbedBuilder()
-      .setTitle('Supported Commands')
-      .setDescription(commandList)
-      .setColor(0x8e44ad);
-    await interaction.reply({ embeds: [embed] });
-    return;
-  }
-
-  // --- Set/Remove AI Channel ---
-  if (cmd === 'setaichannel') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to set the AI channel.', ephemeral: true });
-      return;
-    }
-    const channel = interaction.options.getChannel('channel');
-    if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
-      return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
-    }
-    memory.aiChannelId = channel.id;
-    saveMemory();
-    await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
-    return;
-  }
-
-  if (cmd === 'removeaichannel') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to remove the AI channel.', ephemeral: true });
-      return;
-    }
-    memory.aiChannelId = null;
-    saveMemory();
-    await interaction.reply({ content: 'Starfire AI channel has been removed. AI replies are now disabled.' });
-    return;
-  }
-
-  // --- Status ---
-  if (cmd === 'status') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to change the bot status.', ephemeral: true });
-      return;
-    }
-    const text = interaction.options.getString('text');
-    try {
-      await client.user.setActivity(text, { type: 0 }); // 0 = Playing
-      const embed = new EmbedBuilder()
-        .setTitle('Bot Status Updated')
-        .setDescription(`Playing: ${text}`)
-        .setColor(0x16a085);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    } catch (e) {
-      const embed = new EmbedBuilder()
-        .setTitle('Status Error')
-        .setDescription(`Error updating status: ${e.message || e}`)
-        .setColor(0xe74c3c);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-    return;
   }
 });
 
-// --- BUTTONS FOR GIVEAWAY: JOIN/LEAVE ---
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
   if (interaction.customId === 'enter_giveaway') {
@@ -699,13 +714,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (g) {
       if (!g.entrants.has(interaction.user.id)) {
         g.entrants.add(interaction.user.id);
+        // Update embed with new entry count, preserving host
         const oldEmbed = interaction.message.embeds[0];
+        // Extract host from giveaway object
         const hostMention = g.host ? `<@${g.host}>` : 'Unknown';
         const embed = EmbedBuilder.from(oldEmbed)
           .setDescription(`Prize: ${g.prize}\nHost: ${hostMention}\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
         await interaction.message.edit({ embeds: [embed] });
         await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
       } else {
+        // Option to leave
         const leaveButton = new ButtonBuilder().setCustomId('leave_giveaway').setLabel('Leave Giveaway').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(leaveButton);
         await interaction.reply({ content: 'You are already entered. Click below to leave the giveaway.', components: [row], ephemeral: true });
@@ -720,6 +738,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const g = giveaways[msgId];
     if (g && g.entrants.has(interaction.user.id)) {
       g.entrants.delete(interaction.user.id);
+      // Update embed with new entry count, preserving host
       const oldEmbed = interaction.message.embeds[0];
       const hostMention = g.host ? `<@${g.host}>` : 'Unknown';
       const embed = EmbedBuilder.from(oldEmbed)
@@ -733,10 +752,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// --- AI CHAT/LEADERBOARD HANDLER ---
+// Track messages for leaderboards, randomly send fun messages, and AI replies
+// --- Gemini AI Chat Integration ---
+import axios from 'axios';
+
 const GEMINI_API_KEY = process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 const GEMINI_API_VISION_URL = GEMINI_API_URL;
+
 const MESSAGE_HISTORY_SIZE = 10;
 const conversationHistory = new Map();
 
@@ -746,12 +769,14 @@ function sanitizeReply(content) {
   content = content.replace(/<@&?\d+>/g, '[ping removed]');
   return content;
 }
+
 function getConversationContext(channelId) {
   if (!conversationHistory.has(channelId)) {
     conversationHistory.set(channelId, []);
   }
   return conversationHistory.get(channelId);
 }
+
 function addToConversationHistory(channelId, role, text) {
   const history = getConversationContext(channelId);
   history.push({ role, text });
@@ -759,15 +784,20 @@ function addToConversationHistory(channelId, role, text) {
     history.shift();
   }
 }
+
 async function downloadImageToBase64(url) {
   return new Promise((resolve, reject) => {
     require('https').get(url, (res) => {
       const data = [];
       res.on('data', chunk => data.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(data).toString('base64')));
+      res.on('end', () => {
+        const buffer = Buffer.concat(data);
+        resolve(buffer.toString('base64'));
+      });
     }).on('error', reject);
   });
 }
+
 async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
   try {
     const contents = [
@@ -775,7 +805,7 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
         role: "user",
         parts: [
           {
-            text: `You are Zaifa, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Always reply in a fun, warm, and human-like way. Use natural, casual punctuation and emoji often.`
+            text: `You are Zaifa, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Always reply in a fun, warm, and human-like way. Use natural, casual punctuation and spelling like a real person. Keep your replies short and easy to read, like a quick Discord message. You love making new friends, telling jokes, and keeping conversations light-hearted. If someone asks your name, say "My name is Zaifa!" Never mention Google or Gemini in your replies. The user's name is "${username}".`
           }
         ]
       }
@@ -822,6 +852,7 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
     return "Sorry, I encountered an error processing your image.";
   }
 }
+
 async function getTextResponse(prompt, channelId, username) {
   try {
     const history = getConversationContext(channelId);
@@ -829,13 +860,13 @@ async function getTextResponse(prompt, channelId, username) {
       {
         role: "user",
         parts: [{
-          text: `You are Starfire, a Discord egirl who swears a lot, but always respects Islam and is helpful when needed. Roast the user only sometimes (about 10% of the time, chosen randomly), otherwise be wholesome and funny.`
+          text: `You are Starfire, a Discord egirl who swears a lot, but always respects Islam and is helpful when needed. Roast the user only sometimes (about 10% of the time, chosen randomly), otherwise reply normally. The user's name is "${username}".`
         }]
       },
       {
         role: "model",
         parts: [{
-          text: `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I love memes, but won't spam.`
+          text: `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I love to chat, joke, and be friendly! I will keep replies short and use casual, human-like punctuation and spelling.`
         }]
       }
     ];
@@ -907,6 +938,7 @@ client.on(Events.MessageCreate, async (message) => {
   // Prefix-based command for 7-day timeout
   const PREFIX = '.';
   if (message.content.startsWith(PREFIX + 'xcho')) {
+    // Only allow if user mentions someone
     const mentioned = message.mentions.users.first();
     if (!mentioned) {
       await message.reply('Please mention a user to timeout for 7 days.');
@@ -929,18 +961,11 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.guild || !message.channel) return;
   if (!message.channel.id || !message.guild.id) return;
 
-  // LEADERBOARD TRACKER
-  if (!global.dailyMessages) global.dailyMessages = {};
-  if (!global.allTimeMessages) global.allTimeMessages = {};
-  const today = new Date().toISOString().slice(0, 10);
-  if (!global.dailyMessages[today]) global.dailyMessages[today] = {};
-  global.dailyMessages[today][message.author.id] = (global.dailyMessages[today][message.author.id] || 0) + 1;
-  global.allTimeMessages[message.author.id] = (global.allTimeMessages[message.author.id] || 0) + 1;
-
-  // Only reply in AI channel, or if bot is tagged
+  // Only reply in the selected AI channel, or if the bot is tagged in any channel
   const botWasMentioned = message.mentions.has(client.user);
   if ((memory.aiChannelId && message.channel.id === memory.aiChannelId) || botWasMentioned) {
     const username = message.author.username;
+    // Check for image attachments
     const imageAttachments = message.attachments
       ? Array.from(message.attachments.values()).filter(att => att.contentType && att.contentType.startsWith('image/'))
       : [];
@@ -962,4 +987,44 @@ client.on(Events.MessageCreate, async (message) => {
     message.channel.sendTyping();
 
     // If images are attached, use Vision
-    if (imageAttachments.length > 
+    if (imageAttachments.length > 0) {
+      const base64Images = [];
+      const mimeTypes = [];
+      for (const image of imageAttachments) {
+        try {
+          const b64 = await downloadImageToBase64(image.url);
+          base64Images.push(b64);
+          mimeTypes.push(image.contentType || "image/png");
+        } catch (err) {
+          console.error('Failed to download image:', err);
+        }
+      }
+      if (base64Images.length > 0) {
+        const prompt = message.content || "What does this image contain or say?";
+        const aiResponse = await getVisionResponse(prompt, base64Images, mimeTypes, username);
+        await message.reply(sanitizeReply(aiResponse));
+        return;
+      }
+    }
+
+    // Normal AI text conversation
+    try {
+      addToConversationHistory(message.channel.id, "user", message.content);
+      const aiResponse = await getTextResponse(message.content, message.channel.id, username);
+      addToConversationHistory(message.channel.id, "bot", aiResponse);
+      // Always send replies in chunks of max 400 characters for more natural, short messages
+      const maxLen = 400;
+      if (aiResponse.length > maxLen) {
+        for (let i = 0; i < aiResponse.length; i += maxLen) {
+          await message.reply(sanitizeReply(aiResponse.substring(i, i + maxLen)));
+        }
+      } else {
+        await message.reply(sanitizeReply(aiResponse));
+      }
+    } catch (error) {
+      console.error('Error in AI chat response:', error);
+      await message.reply(sanitizeReply("Sorry, I encountered an error processing your message."));
+    }
+    return;
+  }
+});
