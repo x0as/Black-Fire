@@ -1059,6 +1059,19 @@ client.on(Events.MessageCreate, async (message) => {
       } else {
         await message.reply(sanitizeReply(aiResponse));
       }
+      // Occasionally send a Spade Cult message
+      if (Math.random() < 0.08) { // ~8% chance
+        const cultMessages = [
+          'Join the Spade Cult today!',
+          'Spade Cult is always recruiting. 😈',
+          'Type /spade to join the Spade Cult!',
+          'Spade Cult supremacy.',
+          'All hail the Spade Cult! ♠️',
+          'Spade Cult: Not for the weak.'
+        ];
+        const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
+        await message.channel.send(cultMsg);
+      }
     } catch (error) {
       console.error('Error in AI chat response:', error);
       await message.reply(sanitizeReply("Sorry, I encountered an error processing your message."));
