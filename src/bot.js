@@ -548,7 +548,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setFooter({ text: `Giveaway ID: pending` });
       let giveawayMsg;
       if (deferred) {
-        // If deferred, use editReply and fetch the sent message
+        // If deferred, use editReply and fetch the sent message (public, not ephemeral)
         await interaction.editReply({ embeds: [embed], components: [row] });
         // Try to fetch the last message sent by the bot in this channel
         const messages = await interaction.channel.messages.fetch({ limit: 5 });
@@ -558,6 +558,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           giveawayMsg = messages.first();
         }
       } else {
+        // Always public (no flags/ephemeral)
         giveawayMsg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
       }
       await saveGiveaway(giveawayMsg.id, { host, prize, endTime, entrants: new Set(), winner: null, color });
