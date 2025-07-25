@@ -427,7 +427,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
           const winnerMention = winnerId ? `<@${winnerId}>` : 'No entrants.';
           const endEmbed = new EmbedBuilder()
-            .setTitle(interaction.commandName === 'spade' ? '🟣 SPADE GIVEAWAY ENDED 🟣' : '🎉 GIVEAWAY ENDED 🎉')
+            .setTitle(interaction.commandName === 'spade' ? ' spade's giveaway ended! ' : '🎉 GIVEAWAY ENDED 🎉')
             .setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nWinner: ${winnerMention}${winnerId ? `\n🎉 Congratulations ${winnerMention}! You won the giveaway for **${g.prize}**! 🎉` : ''}\nEntries: ${g.entrants.size}`)
             .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : (interaction.commandName === 'spade' ? 0x8e44ad : 0xf1c40f))
             .setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
