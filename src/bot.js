@@ -756,7 +756,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 // --- Gemini AI Chat Integration ---
 import axios from 'axios';
 
-const GEMINI_API_KEY = process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8';
+// Support multiple Gemini API keys for quota failover
+const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8']).map(k => k.trim()).filter(Boolean);
+let geminiApiKeyIndex = 0;
+function getCurrentGeminiApiKey() {
+  return GEMINI_API_KEYS[geminiApiKeyIndex];
+}
+function rotateGeminiApiKey() {
+  geminiApiKeyIndex = (geminiApiKeyIndex + 1) % GEMINI_API_KEYS.length;
+}
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 const GEMINI_API_VISION_URL = GEMINI_API_URL;
 
@@ -799,111 +807,141 @@ async function downloadImageToBase64(url) {
 }
 
 async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
-  try {
-    const contents = [
-      {
-        role: "user",
-        parts: [
-          {
-            text: `You are Zaifa, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Always reply in a fun, warm, and human-like way. Use natural, casual punctuation and spelling like a real person. Keep your replies short and easy to read, like a quick Discord message. You love making new friends, telling jokes, and keeping conversations light-hearted. If someone asks your name, say "My name is Zaifa!" Never mention Google or Gemini in your replies. The user's name is "${username}".`
-          }
-        ]
-      }
-    ];
-    for (let i = 0; i < base64Images.length; i++) {
-      contents.push({
-        role: "user",
-        parts: [
-          {
-            inline_data: {
-              mime_type: mimeTypes[i] || "image/png",
-              data: base64Images[i]
-            }
-          }
-        ]
-      });
+  const contents = [
+    {
+      role: "user",
+      parts: [
+        {
+          text: `You are Zaifa, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Always reply in a fun, warm, and human-like way. Use natural, casual punctuation and spelling like a real person. Keep your replies short and easy to read, like a quick Discord message. You love making new friends, telling jokes, and keeping conversations light-hearted. If someone asks your name, say "My name is Zaifa!" Never mention Google or Gemini in your replies. The user's name is "${username}".`
+        }
+      ]
     }
+  ];
+  for (let i = 0; i < base64Images.length; i++) {
     contents.push({
       role: "user",
-      parts: [{ text: prompt }]
-    });
-    const response = await axios.post(
-      `${GEMINI_API_VISION_URL}?key=${GEMINI_API_KEY}`,
-      {
-        contents,
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 800,
+      parts: [
+        {
+          inline_data: {
+            mime_type: mimeTypes[i] || "image/png",
+            data: base64Images[i]
+          }
         }
-      }
-    );
-    if (response.data &&
-      response.data.candidates &&
-      response.data.candidates[0] &&
-      response.data.candidates[0].content &&
-      response.data.candidates[0].content.parts) {
-      return response.data.candidates[0].content.parts[0].text;
-    }
-    return "Sorry, I couldn't generate a response at this time.";
-  } catch (error) {
-    console.error('Error getting Gemini Vision response:', error.response?.data || error.message);
-    return "Sorry, I encountered an error processing your image.";
+      ]
+    });
   }
+  contents.push({
+    role: "user",
+    parts: [{ text: prompt }]
+  });
+  let lastError;
+  for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+    try {
+      const apiKey = getCurrentGeminiApiKey();
+      const response = await axios.post(
+        `${GEMINI_API_VISION_URL}?key=${apiKey}`,
+        {
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 800,
+          }
+        }
+      );
+      if (response.data &&
+        response.data.candidates &&
+        response.data.candidates[0] &&
+        response.data.candidates[0].content &&
+        response.data.candidates[0].content.parts) {
+        return response.data.candidates[0].content.parts[0].text;
+      }
+      return "Sorry, I couldn't generate a response at this time.";
+    } catch (error) {
+      lastError = error;
+      // If quota exceeded, rotate key and try again
+      if (error.response && error.response.data &&
+          (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
+           error.response.data.error?.message?.toLowerCase().includes('quota'))) {
+        console.warn('Gemini API quota exceeded, rotating API key...');
+        rotateGeminiApiKey();
+        continue;
+      }
+      // Other errors, break
+      break;
+    }
+  }
+  console.error('Error getting Gemini Vision response:', lastError?.response?.data || lastError?.message);
+  return "Sorry, I encountered an error processing your image.";
 }
 
 async function getTextResponse(prompt, channelId, username) {
-  try {
-    const history = getConversationContext(channelId);
-    const contents = [
-      {
-        role: "user",
-        parts: [{
-          text: `You are Starfire, a Discord egirl who swears a lot, but always respects Islam and is helpful when needed. Roast the user only sometimes (about 10% of the time, chosen randomly), otherwise reply normally. The user's name is "${username}".`
-        }]
-      },
-      {
-        role: "model",
-        parts: [{
-          text: `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I love to chat, joke, and be friendly! I will keep replies short and use casual, human-like punctuation and spelling.`
-        }]
-      }
-    ];
-    for (const msg of history) {
-      contents.push({
-        role: msg.role === "bot" ? "model" : "user",
-        parts: [{ text: msg.text }]
-      });
-    }
-    contents.push({
+  const history = getConversationContext(channelId);
+  const contents = [
+    {
       role: "user",
-      parts: [{ text: prompt }]
-    });
-    const response = await axios.post(
-      `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
-      {
-        contents,
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 800,
-        }
-      }
-    );
-    if (response.data &&
-      response.data.candidates &&
-      response.data.candidates[0] &&
-      response.data.candidates[0].content &&
-      response.data.candidates[0].content.parts) {
-      return response.data.candidates[0].content.parts[0].text;
+      parts: [{
+        text: `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`
+      }]
+    },
+    {
+      role: "model",
+      parts: [{
+        text: `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
+      }]
     }
-    return "Sorry, I couldn't generate a response at this time.";
-  } catch (error) {
-    console.error('Error getting Gemini response:', error.response?.data || error.message);
-    return "Sorry, I encountered an error processing your request.";
+  ];
+  for (const msg of history) {
+    contents.push({
+      role: msg.role === "bot" ? "model" : "user",
+      parts: [{ text: msg.text }]
+    });
   }
+  contents.push({
+    role: "user",
+    parts: [{ text: prompt }]
+  });
+  let lastError;
+  for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+    try {
+      const apiKey = getCurrentGeminiApiKey();
+      const response = await axios.post(
+        `${GEMINI_API_URL}?key=${apiKey}`,
+        {
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 800,
+          }
+        }
+      );
+      if (response.data &&
+        response.data.candidates &&
+        response.data.candidates[0] &&
+        response.data.candidates[0].content &&
+        response.data.candidates[0].content.parts) {
+        return response.data.candidates[0].content.parts[0].text;
+      }
+      return "Sorry, I couldn't generate a response at this time.";
+    } catch (error) {
+      lastError = error;
+      // If quota exceeded, rotate key and try again
+      if (error.response && error.response.data &&
+          (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
+           error.response.data.error?.message?.toLowerCase().includes('quota'))) {
+        console.warn('Gemini API quota exceeded, rotating API key...');
+        rotateGeminiApiKey();
+        continue;
+      }
+      // Other errors, break
+      break;
+    }
+  }
+  console.error('Error getting Gemini response:', lastError?.response?.data || lastError?.message);
+  return "Sorry, I encountered an error processing your request.";
 }
 
 const ownerQuestions = [
