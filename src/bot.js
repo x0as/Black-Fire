@@ -999,6 +999,23 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.guild || !message.channel) return;
   if (!message.channel.id || !message.guild.id) return;
 
+  // Spade Cult message every 100 messages in the server
+  if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
+  global.spadeCultMsgCounter++;
+  if (global.spadeCultMsgCounter >= 100) {
+    const cultMessages = [
+      'Join the Spade Cult today!',
+      'Spade Cult is always recruiting. 😈',
+      'Type /spade to join the Spade Cult!',
+      'Spade Cult supremacy.',
+      'All hail the Spade Cult! ♠️',
+      'Spade Cult: Not for the weak.'
+    ];
+    const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
+    await message.channel.send(cultMsg);
+    global.spadeCultMsgCounter = 0;
+  }
+
   // Only reply in the selected AI channel, or if the bot is tagged in any channel
   const botWasMentioned = message.mentions.has(client.user);
   if ((memory.aiChannelId && message.channel.id === memory.aiChannelId) || botWasMentioned) {
@@ -1058,22 +1075,6 @@ client.on(Events.MessageCreate, async (message) => {
         }
       } else {
         await message.reply(sanitizeReply(aiResponse));
-      }
-      // Send a Spade Cult message once every 100 AI replies
-      if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
-      global.spadeCultMsgCounter++;
-      if (global.spadeCultMsgCounter >= 100) {
-        const cultMessages = [
-          'Join the Spade Cult today!',
-          'Spade Cult is always recruiting. 😈',
-          'Type /spade to join the Spade Cult!',
-          'Spade Cult supremacy.',
-          'All hail the Spade Cult! ♠️',
-          'Spade Cult: Not for the weak.'
-        ];
-        const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
-        await message.channel.send(cultMsg);
-        global.spadeCultMsgCounter = 0;
       }
     } catch (error) {
       console.error('Error in AI chat response:', error);
