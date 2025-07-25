@@ -259,6 +259,19 @@ client.once('ready', () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Defer reply for all commands that may take time
+  const slowCommands = [
+    'setaichannel', 'removeaichannel', 'editgiveaway', 'deletegiveaway', 'endgiveaway', 'giveaway', 'spade'
+  ];
+  if (slowCommands.includes(interaction.commandName)) {
+    try {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({ ephemeral: true });
+      }
+    } catch (e) {
+      // Ignore if already replied/deferred
+    }
+  }
   // /spadecult: Assign Spade Cult role to user
   if (interaction.commandName === 'spadecult') {
     const roleId = '1391511769842974870';
