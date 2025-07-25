@@ -406,7 +406,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const button = new ButtonBuilder().setCustomId('enter_giveaway').setLabel('Join Giveaway').setStyle(ButtonStyle.Success);
       const row = new ActionRowBuilder().addComponents(button);
       const embed = new EmbedBuilder()
-        .setTitle(interaction.commandName === 'spade' ? " spade's giveaway " : '🎉 GIVEAWAY 🎉')
+        .setTitle(interaction.commandName === 'spade' ? 'spade giveaway ended' : '🎉 GIVEAWAY ENDED 🎉')
         .setDescription(`Prize: ${prize}\nHost: <@${host}>\nEnds in ${duration} minutes!\nEntries: 0`)
         .setColor(color ? parseInt(color.replace('#', ''), 16) : (interaction.commandName === 'spade' ? 0x8e44ad : 0xf1c40f))
         .setFooter({ text: `Giveaway ID: pending` });
