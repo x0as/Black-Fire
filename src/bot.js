@@ -462,19 +462,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
   // Set AI channel
   if (interaction.commandName === 'setaichannel') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to set the AI channel.', flags: 64 });
+    try {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You do not have permission to set the AI channel.', flags: 64 });
+        return;
+      }
+      const channel = interaction.options.getChannel('channel');
+      if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
+        await interaction.reply({ content: 'Please select a text channel.', flags: 64 });
+        return;
+      }
+      memory.aiChannelId = channel.id;
+      await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
+      return;
+    } catch (e) {
+      console.error('setaichannel error:', e);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'An error occurred while setting the AI channel.', flags: 64 });
+      }
       return;
     }
-    const channel = interaction.options.getChannel('channel');
-    if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
-      return await interaction.reply({ content: 'Please select a text channel.', flags: 64 });
-    }
-    memory.aiChannelId = channel.id;
-    await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
   }
   // Remove AI channel
   if (interaction.commandName === 'removeaichannel') {
