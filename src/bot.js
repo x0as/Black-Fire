@@ -1059,8 +1059,10 @@ client.on(Events.MessageCreate, async (message) => {
       } else {
         await message.reply(sanitizeReply(aiResponse));
       }
-      // Occasionally send a Spade Cult message
-      if (Math.random() < 0.08) { // ~8% chance
+      // Send a Spade Cult message once every 100 AI replies
+      if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
+      global.spadeCultMsgCounter++;
+      if (global.spadeCultMsgCounter >= 100) {
         const cultMessages = [
           'Join the Spade Cult today!',
           'Spade Cult is always recruiting. 😈',
@@ -1071,6 +1073,7 @@ client.on(Events.MessageCreate, async (message) => {
         ];
         const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
         await message.channel.send(cultMsg);
+        global.spadeCultMsgCounter = 0;
       }
     } catch (error) {
       console.error('Error in AI chat response:', error);
