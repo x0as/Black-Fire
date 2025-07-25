@@ -311,7 +311,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [embed] });
       await interaction.reply({ content: 'Giveaway updated!', ephemeral: true });
-      saveMemory();
     } catch (e) {
       console.error('editgiveaway error:', e);
       await interaction.reply({ content: `Error updating giveaway: ${e.message || e}`, ephemeral: true });
@@ -331,12 +330,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const msgId = interaction.options.getString('message_id');
     if (!giveaways[msgId]) return await interaction.reply({ content: 'No active giveaway found for that message ID.', ephemeral: true });
     delete giveaways[msgId];
-    saveMemory();
     try {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.delete();
       await interaction.reply({ content: 'Giveaway deleted!', ephemeral: true });
-      saveMemory();
     } catch (e) {
       console.error('deletegiveaway error:', e);
       await interaction.reply({ content: `Error deleting giveaway: ${e.message || e}`, ephemeral: true });
@@ -371,7 +368,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await msg.edit({ embeds: [endEmbed], components: [] });
       // Use followUp for delayed response to avoid 'Unknown interaction' error
       await interaction.followUp({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
-      saveMemory();
     } catch (e) {
       console.error('endgiveaway error:', e);
       await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, ephemeral: true });
@@ -405,7 +401,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
     }
     memory.aiChannelId = channel.id;
-    saveMemory();
     await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
   }
   // Remove AI channel
@@ -418,7 +413,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     memory.aiChannelId = null;
-    saveMemory();
     await interaction.reply({ content: 'Starfire AI channel has been removed. AI replies are now disabled.' });
     return;
   }
@@ -485,7 +479,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Update embed with real message ID
       embed.setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
       await giveawayMsg.edit({ embeds: [embed] });
-      saveMemory();
       setTimeout(async () => {
         try {
           const g = await getGiveaway(giveawayMsg.id);
