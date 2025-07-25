@@ -267,12 +267,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (slowCommands.includes(interaction.commandName)) {
     try {
       if (!interaction.deferred && !interaction.replied) {
-        // For giveaway and spade, always public (no flags)
-        if (interaction.commandName === 'giveaway' || interaction.commandName === 'spade') {
-          await interaction.deferReply();
-        } else {
-          await interaction.deferReply({ flags: 64 }); // 64 = EPHEMERAL
-        }
+        // Always public for all slow/admin commands
+        await interaction.deferReply();
         deferred = true;
       }
     } catch (e) {
@@ -1064,12 +1060,18 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
 async function getTextResponse(prompt, channelId, username, userId) {
   const history = getConversationContext(channelId);
   let systemPrompt;
-  const kindUserIds = ['843061674378002453', '1360908254712172544'];
-  if (kindUserIds.includes(userId)) {
-    // Kind, respectful, helpful, refer to as master/king
+  let modelPrompt;
+  if (userId === '843061674378002453') {
+    // xcho: master/king
     systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
+    modelPrompt = `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them master or king.`;
+  } else if (userId === '1360908254712172544') {
+    // spade: queen
+    systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user queen or spade queen sometimes, and be as helpful as possible. The user's name is "${username}".`;
+    modelPrompt = `Understood. I'll refer to myself as Starfire, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them queen or spade queen.`;
   } else {
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
+    modelPrompt = `Understood. I'll refer to myself as Starfire, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`;
   }
   const contents = [
     {
@@ -1078,11 +1080,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
     },
     {
       role: "model",
-      parts: [{
-        text: kindUserIds.includes(userId)
-          ? `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them master or king.`
-          : `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
-      }]
+      parts: [{ text: modelPrompt }]
     }
   ];
   for (const msg of history) {
