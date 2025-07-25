@@ -266,7 +266,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (slowCommands.includes(interaction.commandName)) {
     try {
       if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: 64 }); // 64 = EPHEMERAL
       }
     } catch (e) {
       // Ignore if already replied/deferred
@@ -278,18 +278,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const role = interaction.guild.roles.cache.get(roleId);
     if (!role) {
-      await interaction.reply({ content: 'Spade Cult role not found in this server.', ephemeral: true });
+      await interaction.reply({ content: 'Spade Cult role not found in this server.', flags: 64 });
       return;
     }
     if (member.roles.cache.has(roleId)) {
-      await interaction.reply({ content: 'You already have the Spade Cult role!', ephemeral: true });
+      await interaction.reply({ content: 'You already have the Spade Cult role!', flags: 64 });
       return;
     }
     try {
       await member.roles.add(role);
-      await interaction.reply({ content: 'You have joined the Spade Cult! ♠️', ephemeral: false });
+      await interaction.reply({ content: 'You have joined the Spade Cult! ♠️' });
     } catch (e) {
-      await interaction.reply({ content: `Failed to assign role: ${e.message}`, ephemeral: true });
+      await interaction.reply({ content: `Failed to assign role: ${e.message}`, flags: 64 });
     }
     return;
   }
@@ -299,7 +299,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
     try {
@@ -309,7 +309,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const color = interaction.options.getString('color');
       const host = interaction.options.getString('host');
       const g = giveaways[msgId];
-      if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', ephemeral: true });
+      if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
       if (prize) g.prize = prize;
       if (duration) g.endTime = Date.now() + duration * 60000;
       if (color) g.color = color;
@@ -323,10 +323,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setFooter({ text: `Giveaway ID: ${msgId}` });
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [embed] });
-      await interaction.reply({ content: 'Giveaway updated!', ephemeral: true });
+      await interaction.reply({ content: 'Giveaway updated!', flags: 64 });
     } catch (e) {
       console.error('editgiveaway error:', e);
-      await interaction.reply({ content: `Error updating giveaway: ${e.message || e}`, ephemeral: true });
+      await interaction.reply({ content: `Error updating giveaway: ${e.message || e}`, flags: 64 });
     }
     return;
   }
@@ -337,19 +337,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
     const msgId = interaction.options.getString('message_id');
-    if (!giveaways[msgId]) return await interaction.reply({ content: 'No active giveaway found for that message ID.', ephemeral: true });
+    if (!giveaways[msgId]) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
     delete giveaways[msgId];
     try {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.delete();
-      await interaction.reply({ content: 'Giveaway deleted!', ephemeral: true });
+      await interaction.reply({ content: 'Giveaway deleted!', flags: 64 });
     } catch (e) {
       console.error('deletegiveaway error:', e);
-      await interaction.reply({ content: `Error deleting giveaway: ${e.message || e}`, ephemeral: true });
+      await interaction.reply({ content: `Error deleting giveaway: ${e.message || e}`, flags: 64 });
     }
     return;
   }
@@ -360,12 +360,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
     const msgId = interaction.options.getString('message_id');
     const g = giveaways[msgId];
-    if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', ephemeral: true });
+    if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
     let winnerId = g.winner;
     if (!winnerId && g.entrants.size > 0) {
       const entrantsArr = Array.from(g.entrants);
@@ -383,7 +383,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.followUp({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
     } catch (e) {
       console.error('endgiveaway error:', e);
-      await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, ephemeral: true });
+      await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, flags: 64 });
     }
     return;
   }
@@ -406,12 +406,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to set the AI channel.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to set the AI channel.', flags: 64 });
       return;
     }
     const channel = interaction.options.getChannel('channel');
     if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
-      return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
+      return await interaction.reply({ content: 'Please select a text channel.', flags: 64 });
     }
     memory.aiChannelId = channel.id;
     await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
@@ -422,7 +422,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to remove the AI channel.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to remove the AI channel.', flags: 64 });
       return;
     }
     memory.aiChannelId = null;
@@ -435,7 +435,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to change the bot status.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to change the bot status.', flags: 64 });
       return;
     }
     const text = interaction.options.getString('text');
@@ -445,13 +445,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTitle('Bot Status Updated')
         .setDescription(`Playing: ${text}`)
         .setColor(0x16a085);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: 64 });
     } catch (e) {
       const embed = new EmbedBuilder()
         .setTitle('Status Error')
         .setDescription(`Error updating status: ${e.message || e}`)
         .setColor(0xe74c3c);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: 64 });
     }
     return;
   }
@@ -463,14 +463,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
     // Restrict /spade command to specific user IDs
     if (interaction.commandName === 'spade') {
       const allowedIds = ['1360908254712172544', '1396937647074709577', '843061674378002453'];
       if (!allowedIds.includes(interaction.user.id)) {
-        await interaction.reply({ content: 'You do not have permission to use /spade.', ephemeral: true });
+        await interaction.reply({ content: 'You do not have permission to use /spade.', flags: 64 });
         return;
       }
     }
@@ -521,7 +521,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }, duration * 60000);
     } catch (e) {
       console.error('giveaway command error:', e);
-      await interaction.reply({ content: `Error starting giveaway: ${e.message || e}`, ephemeral: true });
+      await interaction.reply({ content: `Error starting giveaway: ${e.message || e}`, flags: 64 });
     }
   }
 
@@ -531,16 +531,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
     const msgId = interaction.options.getString('message_id');
     const winnerId = interaction.options.getString('winner');
     if (giveaways[msgId]) {
       giveaways[msgId].winner = winnerId;
-      await interaction.reply({ content: `Winner for giveaway ${msgId} set to <@${winnerId}> (secretly).`, ephemeral: true });
+      await interaction.reply({ content: `Winner for giveaway ${msgId} set to <@${winnerId}> (secretly).`, flags: 64 });
     } else {
-      await interaction.reply({ content: `No active giveaway found for message ID ${msgId}.`, ephemeral: true });
+      await interaction.reply({ content: `No active giveaway found for message ID ${msgId}.`, flags: 64 });
     }
   }
 
@@ -623,14 +623,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use moderation commands.', ephemeral: true });
+      await interaction.reply({ content: 'You do not have permission to use moderation commands.', flags: 64 });
       return;
     }
     const sub = interaction.options.getSubcommand();
     if (sub === 'ban') {
       const user = interaction.options.getUser('user');
       const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+      if (!target) return await interaction.reply({ content: 'User not found.', flags: 64 });
       try {
         await target.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${interaction.user.tag}`);
         await interaction.reply({ content: `⏳ Timed out ${user.tag} for 7 days.` });
@@ -641,8 +641,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const user = interaction.options.getUser('user');
       const duration = interaction.options.getInteger('duration');
       const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
-      if (!duration || duration < 1 || duration > 10080) return await interaction.reply({ content: 'Duration must be between 1 and 10080 minutes (max 7 days).', ephemeral: true });
+      if (!target) return await interaction.reply({ content: 'User not found.', flags: 64 });
+      if (!duration || duration < 1 || duration > 10080) return await interaction.reply({ content: 'Duration must be between 1 and 10080 minutes (max 7 days).', flags: 64 });
       try {
         await target.timeout(duration * 60 * 1000, `Timed out by ${interaction.user.tag}`);
         await interaction.reply({ content: `⏳ Timed out ${user.tag} for ${duration} minutes.` });
@@ -652,7 +652,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else if (sub === 'kick') {
       const user = interaction.options.getUser('user');
       const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+      if (!target) return await interaction.reply({ content: 'User not found.', flags: 64 });
       try {
         await target.kick(`Kicked by ${interaction.user.tag}`);
         await interaction.reply({ content: `👢 Kicked ${user.tag}` });
@@ -663,7 +663,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const user = interaction.options.getUser('user');
       const duration = interaction.options.getInteger('duration');
       const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+      if (!target) return await interaction.reply({ content: 'User not found.', flags: 64 });
       try {
         let muteRole = interaction.guild.roles.cache.find(r => r.name === 'Muted');
         if (!muteRole) {
@@ -684,7 +684,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     } else if (sub === 'purge') {
       const amount = interaction.options.getInteger('amount');
-      if (!amount || amount < 1 || amount > 100) return await interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
+      if (!amount || amount < 1 || amount > 100) return await interaction.reply({ content: 'Amount must be between 1 and 100.', flags: 64 });
       try {
         const channel = interaction.channel;
         const messages = await channel.bulkDelete(amount, true);
@@ -728,7 +728,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const user = interaction.options.getUser('user');
     const role = interaction.options.getRole('role');
     const member = interaction.guild.members.cache.get(user.id);
-    if (!member || !role) return await interaction.reply({ content: 'User or role not found.', ephemeral: true });
+    if (!member || !role) return await interaction.reply({ content: 'User or role not found.', flags: 64 });
     if (sub === 'add') {
       try {
         await member.roles.add(role);
