@@ -1040,9 +1040,10 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
     parts: [{ text: prompt }]
   });
   let lastError;
-  for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+  let attempts = 0;
+  while (attempts < GEMINI_API_KEYS.length) {
+    const apiKey = getCurrentGeminiApiKey();
     try {
-      const apiKey = getCurrentGeminiApiKey();
       const response = await axios.post(
         `${GEMINI_API_VISION_URL}?key=${apiKey}`,
         {
@@ -1065,12 +1066,12 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
       return "Sorry, I couldn't generate a response at this time.";
     } catch (error) {
       lastError = error;
-      // If quota exceeded, rotate key and try again
       if (error.response && error.response.data &&
           (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
            error.response.data.error?.message?.toLowerCase().includes('quota'))) {
-        console.warn('Gemini API quota exceeded, rotating API key...');
+        console.warn('Gemini API quota exceeded, rotating to next key...');
         rotateGeminiApiKey();
+        attempts++;
         continue;
       }
       // Other errors, break
@@ -1118,9 +1119,10 @@ async function getTextResponse(prompt, channelId, username, userId) {
     parts: [{ text: prompt }]
   });
   let lastError;
-  for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+  let attempts = 0;
+  while (attempts < GEMINI_API_KEYS.length) {
+    const apiKey = getCurrentGeminiApiKey();
     try {
-      const apiKey = getCurrentGeminiApiKey();
       const response = await axios.post(
         `${GEMINI_API_URL}?key=${apiKey}`,
         {
@@ -1143,12 +1145,12 @@ async function getTextResponse(prompt, channelId, username, userId) {
       return "Sorry, I couldn't generate a response at this time.";
     } catch (error) {
       lastError = error;
-      // If quota exceeded, rotate key and try again
       if (error.response && error.response.data &&
           (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
            error.response.data.error?.message?.toLowerCase().includes('quota'))) {
-        console.warn('Gemini API quota exceeded, rotating API key...');
+        console.warn('Gemini API quota exceeded, rotating to next key...');
         rotateGeminiApiKey();
+        attempts++;
         continue;
       }
       // Other errors, break
