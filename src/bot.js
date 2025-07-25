@@ -1,5 +1,6 @@
 import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
 import fs from 'fs';
+import mongoose from 'mongoose';
 import express from 'express';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -28,43 +29,87 @@ let memory = {
   model: 'gemini-pro',
 };
 
-// Persistent memory file
-const MEMORY_FILE = './memory.json';
 
-function loadMemory() {
-  try {
-    if (fs.existsSync(MEMORY_FILE)) {
-      const data = fs.readFileSync(MEMORY_FILE, 'utf8');
-      Object.assign(memory, JSON.parse(data));
-    }
-  } catch (e) {
-    console.error('Failed to load memory:', e);
+// MongoDB connection and schema
+const MONGO_URI = process.env.MONGO_URI;
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+const giveawaySchema = new mongoose.Schema({
+  _id: String, // message id
+  host: String,
+  prize: String,
+  endTime: Number,
+  entrants: [String],
+  winner: String,
+  color: String
+});
+const Giveaway = mongoose.model('Giveaway', giveawaySchema);
+
+// Helper to get all giveaways as a map (for compatibility)
+async function getGiveawaysMap() {
+  const docs = await Giveaway.find({});
+  const map = {};
+  for (const doc of docs) {
+    map[doc._id] = {
+      host: doc.host,
+      prize: doc.prize,
+      endTime: doc.endTime,
+      entrants: new Set(doc.entrants),
+      winner: doc.winner,
+      color: doc.color
+    };
   }
+  return map;
 }
 
-function saveMemory() {
-  try {
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
-  } catch (e) {
-    console.error('Failed to save memory:', e);
-  }
+// Helper to get a single giveaway
+async function getGiveaway(id) {
+  const doc = await Giveaway.findById(id);
+  if (!doc) return null;
+  return {
+    host: doc.host,
+    prize: doc.prize,
+    endTime: doc.endTime,
+    entrants: new Set(doc.entrants),
+    winner: doc.winner,
+    color: doc.color
+  };
 }
 
-loadMemory();
-
-// Ensure entrants are always Sets after loading from memory
-const giveaways = memory.giveaways;
-for (const key in giveaways) {
-  if (giveaways[key]) {
-    if (giveaways[key].entrants instanceof Set) {
-      // already a Set, do nothing
-    } else if (Array.isArray(giveaways[key].entrants)) {
-      giveaways[key].entrants = new Set(giveaways[key].entrants);
-    } else {
-      giveaways[key].entrants = new Set();
-    }
-  }
+// Helper to save/update a giveaway
+async function saveGiveaway(id, data) {
+  await Giveaway.findByIdAndUpdate(
+    id,
+    {
+      host: data.host,
+      prize: data.prize,
+      endTime: data.endTime,
+      entrants: Array.from(data.entrants),
+      winner: data.winner,
+      color: data.color
+    },
+    { upsert: true }
+  );
 }
+
+// Helper to delete a giveaway
+async function deleteGiveaway(id) {
+  await Giveaway.findByIdAndDelete(id);
+}
+
+// Use a proxy for giveaways to always fetch from DB
+const giveaways = new Proxy({}, {
+  get(target, prop) {
+    return (async () => (await getGiveaway(prop)))();
+  },
+  set(target, prop, value) {
+    saveGiveaway(prop, value);
+    return true;
+  },
+  deleteProperty(target, prop) {
+    deleteGiveaway(prop);
+    return true;
+  }
+});
 
 // Register slash commands
 const commands = [
@@ -436,14 +481,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setColor(color ? parseInt(color.replace('#', ''), 16) : (interaction.commandName === 'spade' ? 0x8e44ad : 0xf1c40f))
         .setFooter({ text: `Giveaway ID: pending` });
       const giveawayMsg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
-      giveaways[giveawayMsg.id] = { host, prize, endTime, entrants: new Set(), winner: null, color };
+      await saveGiveaway(giveawayMsg.id, { host, prize, endTime, entrants: new Set(), winner: null, color });
       // Update embed with real message ID
       embed.setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
       await giveawayMsg.edit({ embeds: [embed] });
       saveMemory();
       setTimeout(async () => {
         try {
-          const g = giveaways[giveawayMsg.id];
+          const g = await getGiveaway(giveawayMsg.id);
           if (!g) return;
           let winnerId = g.winner;
           if (!winnerId && g.entrants.size > 0) {
@@ -462,8 +507,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           } else {
             await giveawayMsg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
           }
-          delete giveaways[giveawayMsg.id];
-          saveMemory();
+          await deleteGiveaway(giveawayMsg.id);
         } catch (e) {
           console.error('giveaway end error:', e);
           await giveawayMsg.channel.send({ content: `Error ending giveaway: ${e.message || e}` });
@@ -735,44 +779,72 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
   if (interaction.customId === 'enter_giveaway') {
     const msgId = interaction.message.id;
-    const g = giveaways[msgId];
-    if (g) {
-      if (!g.entrants.has(interaction.user.id)) {
-        g.entrants.add(interaction.user.id);
-        // Update embed with new entry count, preserving host
-        const oldEmbed = interaction.message.embeds[0];
-        // Extract host from giveaway object
-        const hostMention = g.host ? `<@${g.host}>` : 'Unknown';
-        const embed = EmbedBuilder.from(oldEmbed)
-          .setDescription(`Prize: ${g.prize}\nHost: ${hostMention}\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
-        await interaction.message.edit({ embeds: [embed] });
-        await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
-      } else {
-        // Option to leave
-        const leaveButton = new ButtonBuilder().setCustomId('leave_giveaway').setLabel('Leave Giveaway').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(leaveButton);
-        await interaction.reply({ content: 'You are already entered. Click below to leave the giveaway.', components: [row], ephemeral: true });
-      }
-      saveMemory();
-    } else {
+    const g = await getGiveaway(msgId);
+    // Robust error handling for malformed or missing giveaways
+    if (!g || !g.entrants || !(g.entrants instanceof Set)) {
       await interaction.reply({ content: 'This giveaway has ended or is invalid.', ephemeral: true });
+      return;
     }
-  }
-  if (interaction.customId === 'leave_giveaway') {
-    const msgId = interaction.message.reference?.messageId || interaction.message.id;
-    const g = giveaways[msgId];
-    if (g && g.entrants.has(interaction.user.id)) {
-      g.entrants.delete(interaction.user.id);
+    if (!g.entrants.has(interaction.user.id)) {
+      g.entrants.add(interaction.user.id);
+      await saveGiveaway(msgId, g);
       // Update embed with new entry count, preserving host
       const oldEmbed = interaction.message.embeds[0];
       const hostMention = g.host ? `<@${g.host}>` : 'Unknown';
       const embed = EmbedBuilder.from(oldEmbed)
         .setDescription(`Prize: ${g.prize}\nHost: ${hostMention}\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
-      await interaction.message.edit({ embeds: [embed] });
-      await interaction.reply({ content: 'You have left the giveaway.', ephemeral: true });
-      saveMemory();
+      try {
+        await interaction.message.edit({ embeds: [embed] });
+      } catch (e) {
+        // ignore edit errors
+      }
+      try {
+        await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
+      } catch (e) {
+        // ignore reply errors
+      }
     } else {
-      await interaction.reply({ content: 'You are not entered in this giveaway.', ephemeral: true });
+      // Option to leave
+      const leaveButton = new ButtonBuilder().setCustomId('leave_giveaway').setLabel('Leave Giveaway').setStyle(ButtonStyle.Danger);
+      const row = new ActionRowBuilder().addComponents(leaveButton);
+      try {
+        await interaction.reply({ content: 'You are already entered. Click below to leave the giveaway.', components: [row], ephemeral: true });
+      } catch (e) {
+        // ignore reply errors
+      }
+    }
+  }
+  if (interaction.customId === 'leave_giveaway') {
+    const msgId = interaction.message.reference?.messageId || interaction.message.id;
+    const g = await getGiveaway(msgId);
+    if (!g || !g.entrants || !(g.entrants instanceof Set)) {
+      await interaction.reply({ content: 'This giveaway has ended or is invalid.', ephemeral: true });
+      return;
+    }
+    if (g.entrants.has(interaction.user.id)) {
+      g.entrants.delete(interaction.user.id);
+      await saveGiveaway(msgId, g);
+      // Update embed with new entry count, preserving host
+      const oldEmbed = interaction.message.embeds[0];
+      const hostMention = g.host ? `<@${g.host}>` : 'Unknown';
+      const embed = EmbedBuilder.from(oldEmbed)
+        .setDescription(`Prize: ${g.prize}\nHost: ${hostMention}\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
+      try {
+        await interaction.message.edit({ embeds: [embed] });
+      } catch (e) {
+        // ignore edit errors
+      }
+      try {
+        await interaction.reply({ content: 'You have left the giveaway.', ephemeral: true });
+      } catch (e) {
+        // ignore reply errors
+      }
+    } else {
+      try {
+        await interaction.reply({ content: 'You are not entered in this giveaway.', ephemeral: true });
+      } catch (e) {
+        // ignore reply errors
+      }
     }
   }
 });
@@ -901,19 +973,26 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
   return "Sorry, I encountered an error processing your image.";
 }
 
-async function getTextResponse(prompt, channelId, username) {
+async function getTextResponse(prompt, channelId, username, userId) {
   const history = getConversationContext(channelId);
+  let systemPrompt;
+  if (userId === '843061674378002453') {
+    // Kind, respectful, helpful, refer to as master/king
+    systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. When talking to xcho_ (user ID 843061674378002453), always be extremely nice, call them master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
+  } else {
+    systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
+  }
   const contents = [
     {
       role: "user",
-      parts: [{
-        text: `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`
-      }]
+      parts: [{ text: systemPrompt }]
     },
     {
       role: "model",
       parts: [{
-        text: `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
+        text: userId === '843061674378002453'
+          ? `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful to xcho_ (user ID 843061674378002453), sometimes calling them master or king.`
+          : `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
       }]
     }
   ];
@@ -1090,7 +1169,7 @@ client.on(Events.MessageCreate, async (message) => {
     // Normal AI text conversation
     try {
       addToConversationHistory(message.channel.id, "user", message.content);
-      const aiResponse = await getTextResponse(message.content, message.channel.id, username);
+      const aiResponse = await getTextResponse(message.content, message.channel.id, username, message.author.id);
       addToConversationHistory(message.channel.id, "bot", aiResponse);
       // Always send replies in chunks of max 400 characters for more natural, short messages
       const maxLen = 400;
