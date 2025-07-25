@@ -69,6 +69,10 @@ for (const key in giveaways) {
 // Register slash commands
 const commands = [
   {
+    name: 'spadecult',
+    description: 'Join the Spade Cult and get the Spade Cult role!'
+  },
+  {
     name: 'spade',
     description: 'Start a spade-themed giveaway',
     options: [
@@ -210,6 +214,27 @@ client.once('ready', () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // /spadecult: Assign Spade Cult role to user
+  if (interaction.commandName === 'spadecult') {
+    const roleId = '1391511769842974870';
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const role = interaction.guild.roles.cache.get(roleId);
+    if (!role) {
+      await interaction.reply({ content: 'Spade Cult role not found in this server.', ephemeral: true });
+      return;
+    }
+    if (member.roles.cache.has(roleId)) {
+      await interaction.reply({ content: 'You already have the Spade Cult role!', ephemeral: true });
+      return;
+    }
+    try {
+      await member.roles.add(role);
+      await interaction.reply({ content: 'You have joined the Spade Cult! ♠️', ephemeral: false });
+    } catch (e) {
+      await interaction.reply({ content: `Failed to assign role: ${e.message}`, ephemeral: true });
+    }
+    return;
+  }
   // Edit Giveaway
   if (interaction.commandName === 'editgiveaway') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
@@ -1006,7 +1031,7 @@ client.on(Events.MessageCreate, async (message) => {
     const cultMessages = [
       'Join the Spade Cult today!',
       'Spade Cult is always recruiting. 😈',
-      'Type /spade to join the Spade Cult!',
+      'Type /spadecult to join the Spade Cult!',
       'Spade Cult supremacy.',
       'All hail the Spade Cult! ♠️',
       'Spade Cult: Not for the weak.'
