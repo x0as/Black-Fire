@@ -267,7 +267,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (slowCommands.includes(interaction.commandName)) {
     try {
       if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferReply({ flags: 64 }); // 64 = EPHEMERAL
+        // For giveaway and spade, always public (no flags)
+        if (interaction.commandName === 'giveaway' || interaction.commandName === 'spade') {
+          await interaction.deferReply();
+        } else {
+          await interaction.deferReply({ flags: 64 }); // 64 = EPHEMERAL
+        }
         deferred = true;
       }
     } catch (e) {
