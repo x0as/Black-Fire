@@ -546,7 +546,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setDescription(`Prize: ${prize}\nHost: <@${host}>\nEnds in ${duration} minutes!\nEntries: 0`)
         .setColor(color ? parseInt(color.replace('#', ''), 16) : (interaction.commandName === 'spade' ? 0x8e44ad : 0xf1c40f))
         .setFooter({ text: `Giveaway ID: pending` });
-      const giveawayMsg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+      let giveawayMsg;
+      if (deferred) {
+        // If deferred, use editReply and fetch the sent message
+        await interaction.editReply({ embeds: [embed], components: [row] });
+        // Try to fetch the last message sent by the bot in this channel
+        const messages = await interaction.channel.messages.fetch({ limit: 5 });
+        giveawayMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length && m.embeds[0].title === embed.data.title);
+        if (!giveawayMsg) {
+          // fallback: fetch the most recent message
+          giveawayMsg = messages.first();
+        }
+      } else {
+        giveawayMsg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+      }
       await saveGiveaway(giveawayMsg.id, { host, prize, endTime, entrants: new Set(), winner: null, color });
       // Update embed with real message ID
       embed.setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
