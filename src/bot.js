@@ -1232,8 +1232,8 @@ client.on(Events.MessageCreate, async (message) => {
       const roastUserId = mentionMatch[1];
       const roastUser = message.guild.members.cache.get(roastUserId);
       const roastUsername = roastUser ? roastUser.user.username : 'that user';
-      // Compose roast prompt
-      const roastPrompt = `Roast ${roastUsername} in a funny, savage, Discord egirl way. Make fun of them, say something like 'Annoying xcho?' or similar, and keep it playful and short. Never disrespect Islam. Always refer to yourself as Starfire.`;
+      // Compose roast prompt with baddie persona
+      const roastPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. Roast ${roastUsername} in a funny, savage, Discord egirl way. Make fun of them, say something like 'Annoying xcho?' or similar, and keep it playful and short. Always refer to yourself as Starfire.`;
       message.channel.sendTyping();
       try {
         addToConversationHistory(message.channel.id, "user", roastPrompt);
