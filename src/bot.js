@@ -1224,6 +1224,29 @@ client.on(Events.MessageCreate, async (message) => {
     }
     return;
   }
+
+  // Roast command for xcho
+  if (message.author.id === '843061674378002453' && /^roast\s+<@\d+>/i.test(message.content)) {
+    const mentionMatch = message.content.match(/<@(\d+)>/);
+    if (mentionMatch) {
+      const roastUserId = mentionMatch[1];
+      const roastUser = message.guild.members.cache.get(roastUserId);
+      const roastUsername = roastUser ? roastUser.user.username : 'that user';
+      // Compose roast prompt
+      const roastPrompt = `Roast ${roastUsername} in a funny, savage, Discord egirl way. Make fun of them, say something like 'Annoying xcho?' or similar, and keep it playful and short. Never disrespect Islam. Always refer to yourself as Starfire.`;
+      message.channel.sendTyping();
+      try {
+        addToConversationHistory(message.channel.id, "user", roastPrompt);
+        const aiResponse = await getTextResponse(roastPrompt, message.channel.id, message.author.username, message.author.id);
+        addToConversationHistory(message.channel.id, "bot", aiResponse);
+        await message.reply(sanitizeReply(aiResponse));
+      } catch (error) {
+        console.error('Error in roast response:', error);
+        await message.reply(sanitizeReply("Sorry, I couldn't roast that user right now."));
+      }
+      return;
+    }
+  }
   if (message.author.bot) return;
   if (!message.guild || !message.channel) return;
   if (!message.channel.id || !message.guild.id) return;
