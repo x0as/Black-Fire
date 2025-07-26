@@ -1225,15 +1225,19 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
-  // Roast command for xcho
-  if (message.author.id === '843061674378002453' && /^roast\s+<@\d+>/i.test(message.content)) {
+  // Roast command for anyone, but never roast xcho_
+  if (/^roast\s+<@\d+>/i.test(message.content)) {
     const mentionMatch = message.content.match(/<@(\d+)>/);
     if (mentionMatch) {
       const roastUserId = mentionMatch[1];
+      if (roastUserId === '843061674378002453') {
+        await message.reply("I would never roast my master xcho_. Nice try Bitch!");
+        return;
+      }
       const roastUser = message.guild.members.cache.get(roastUserId);
       const roastUsername = roastUser ? roastUser.user.username : 'that user';
       // Compose roast prompt with baddie persona
-      const roastPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. Roast ${roastUsername} in a funny, savage, Discord egirl way. Make fun of them, say something like 'Annoying xcho?' or similar, and keep it playful and short. Always refer to yourself as Starfire.`;
+      const roastPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. Roast ${roastUsername} in a savage disrespectful way, Discord egirl way. Make fun of them, say something like 'Annoying xcho?' or similar, and keep it straight forward. Always refer to yourself as Starfire.`;
       message.channel.sendTyping();
       try {
         addToConversationHistory(message.channel.id, "user", roastPrompt);
