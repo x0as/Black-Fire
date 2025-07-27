@@ -413,7 +413,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     const msgId = interaction.options.getString('message_id');
-    const g = giveaways[msgId];
+    const g = await giveaways[msgId];
     if (!g) {
       if (deferred) {
         await interaction.editReply({ content: 'No active giveaway found for that message ID.' });
