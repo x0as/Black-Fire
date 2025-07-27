@@ -426,17 +426,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!winnerId && g.entrants.size > 0) {
       const entrantsArr = Array.from(g.entrants);
       winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+      g.winner = winnerId;
+      await saveGiveaway(msgId, g);
     }
     const endEmbed = new EmbedBuilder()
       .setTitle('🎉 GIVEAWAY ENDED 🎉')
-      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : `<@${g.host || g.hostId || g.host || g.host}`}>\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
+      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
       .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
       .setFooter({ text: `Giveaway ID: ${msgId}` });
     try {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [endEmbed], components: [] });
-      // Use followUp for delayed response to avoid 'Unknown interaction' error
-      await interaction.followUp({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
+      if (winnerId) {
+        await msg.channel.send({ content: `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
+      } else {
+        await msg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
+      }
+      await deleteGiveaway(msgId);
+      if (deferred) {
+        await interaction.editReply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
+      } else {
+        await interaction.reply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}`, flags: 64 });
+      }
     } catch (e) {
       console.error('endgiveaway error:', e);
       if (deferred) {
@@ -444,6 +455,50 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } else {
         await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, flags: 64 });
       }
+    }
+    return;
+  }
+
+  // Reroll Giveaway
+  if (interaction.commandName === 'reroll') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
+    const msgId = interaction.options.getString('message_id');
+    const g = await giveaways[msgId];
+    if (!g || !g.entrants || g.entrants.size === 0) {
+      await interaction.reply({ content: 'No active giveaway or no entrants found for that message ID.', flags: 64 });
+      return;
+    }
+    // Pick a new winner (different from previous if possible)
+    let entrantsArr = Array.from(g.entrants);
+    let newWinnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+    if (g.winner && entrantsArr.length > 1) {
+      // Avoid picking the same winner if possible
+      entrantsArr = entrantsArr.filter(id => id !== g.winner);
+      if (entrantsArr.length > 0) {
+        newWinnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+      }
+    }
+    g.winner = newWinnerId;
+    await saveGiveaway(msgId, g);
+    const rerollEmbed = new EmbedBuilder()
+      .setTitle('🎉 GIVEAWAY REROLLED 🎉')
+      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nNew Winner: <@${newWinnerId}>\nEntries: ${g.entrants.size}`)
+      .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
+      .setFooter({ text: `Giveaway ID: ${msgId}` });
+    try {
+      const msg = await interaction.channel.messages.fetch(msgId);
+      await msg.edit({ embeds: [rerollEmbed], components: [] });
+      await msg.channel.send({ content: `🎉 Reroll! Congratulations <@${newWinnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
+      await interaction.reply({ content: `Giveaway rerolled! New winner: <@${newWinnerId}>`, flags: 64 });
+    } catch (e) {
+      console.error('reroll error:', e);
+      await interaction.reply({ content: `Error rerolling giveaway: ${e.message || e}`, flags: 64 });
     }
     return;
   }
