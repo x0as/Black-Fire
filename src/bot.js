@@ -885,50 +885,65 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
-  if (interaction.customId === 'enter_giveaway') {
-    const msgId = interaction.message.id;
-    const g = await getGiveaway(msgId);
-    // Robust error handling for malformed or missing giveaways
-    if (!g || !g.entrants || !(g.entrants instanceof Set)) {
-      await interaction.reply({ content: 'This giveaway has ended or is invalid.', ephemeral: true });
-      return;
-    }
-    if (!g.entrants.has(interaction.user.id)) {
-      g.entrants.add(interaction.user.id);
-      await saveGiveaway(msgId, g);
-      // Update embed with new entry count, preserving host
-      const oldEmbed = interaction.message.embeds[0];
-      const hostMention = g.host ? `<@${g.host}>` : 'Unknown';
-      const embed = EmbedBuilder.from(oldEmbed)
-        .setDescription(`Prize: ${g.prize}\nHost: ${hostMention}\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
-      try {
-        await interaction.message.edit({ embeds: [embed] });
-      } catch (e) {
-        // ignore edit errors
-      }
-      try {
-        await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
-      } catch (e) {
-        // ignore reply errors
-      }
     } else {
-      // Option to leave
-      const leaveButton = new ButtonBuilder().setCustomId('leave_giveaway').setLabel('Leave Giveaway').setStyle(ButtonStyle.Danger);
-      const row = new ActionRowBuilder().addComponents(leaveButton);
-      try {
-        await interaction.reply({ content: 'You are already entered. Click below to leave the giveaway.', components: [row], ephemeral: true });
-      } catch (e) {
-        // ignore reply errors
-      }
+      // ...existing code...
     }
-  }
-  if (interaction.customId === 'leave_giveaway') {
-    const msgId = interaction.message.reference?.messageId || interaction.message.id;
-    const g = await getGiveaway(msgId);
-    if (!g || !g.entrants || !(g.entrants instanceof Set)) {
-      await interaction.reply({ content: 'This giveaway has ended or is invalid.', ephemeral: true });
+  // ...existing code...
+});
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
+    const msgId = interaction.options.getString('message_id');
+    const g = await getGiveaway(msgId);
+    if (!g || !g.entrants || !(g.entrants instanceof Set)) {
+      if (deferred) {
+        await interaction.editReply({ content: 'No active giveaway found for that message ID.' });
+      } else {
+        await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+      }
+      return;
+    }
+    let winnerId = g.winner;
+    if (!winnerId && g.entrants.size > 0) {
+      const entrantsArr = Array.from(g.entrants);
+      winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+      g.winner = winnerId;
+      await saveGiveaway(msgId, g);
+    }
+    const endEmbed = new EmbedBuilder()
+      .setTitle('🎉 GIVEAWAY ENDED 🎉')
+      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
+      .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
+      .setFooter({ text: `Giveaway ID: ${msgId}` });
+    try {
+      const msg = await interaction.channel.messages.fetch(msgId);
+      await msg.edit({ embeds: [endEmbed], components: [] });
+      // Announce winner in channel
+      if (winnerId) {
+        await msg.channel.send({ content: `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
+      } else {
+        await msg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
+      }
+      await deleteGiveaway(msgId);
+      if (deferred) {
+        await interaction.editReply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
+      } else {
+        await interaction.reply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}`, flags: 64 });
+      }
+    } catch (e) {
+      console.error('endgiveaway error:', e);
+      if (deferred) {
+        await interaction.editReply({ content: `Error ending giveaway: ${e.message || e}` });
+      } else {
+        await interaction.reply({ content: `Error ending giveaway: ${e.message || e}`, flags: 64 });
+      }
+    }
+    return;
+  }
     if (g.entrants.has(interaction.user.id)) {
       g.entrants.delete(interaction.user.id);
       await saveGiveaway(msgId, g);
