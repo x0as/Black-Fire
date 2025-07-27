@@ -413,7 +413,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     const msgId = interaction.options.getString('message_id');
-    const g = await giveaways[msgId];
+    let g = await giveaways[msgId];
     if (!g) {
       if (deferred) {
         await interaction.editReply({ content: 'No active giveaway found for that message ID.' });
@@ -422,15 +422,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       return;
     }
-    let winnerId = g.winner;
-    if (!winnerId && g.entrants.size > 0) {
-      const entrantsArr = Array.from(g.entrants);
+    // If giveaway is already ended (winner exists), reroll and announce new winner
+    let winnerId;
+    let rerolled = false;
+    if (g.winner && g.entrants.size > 1) {
+      // Reroll: pick a new winner different from previous
+      let entrantsArr = Array.from(g.entrants).filter(id => id !== g.winner);
+      winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+      g.winner = winnerId;
+      rerolled = true;
+      await saveGiveaway(msgId, g);
+    } else if (!g.winner && g.entrants.size > 0) {
+      // Normal end: pick winner
+      let entrantsArr = Array.from(g.entrants);
       winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
       g.winner = winnerId;
       await saveGiveaway(msgId, g);
+    } else {
+      winnerId = g.winner;
     }
     const endEmbed = new EmbedBuilder()
-      .setTitle('🎉 GIVEAWAY ENDED 🎉')
+      .setTitle(rerolled ? '🎉 GIVEAWAY REROLLED 🎉' : '🎉 GIVEAWAY ENDED 🎉')
       .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
       .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
       .setFooter({ text: `Giveaway ID: ${msgId}` });
@@ -438,15 +450,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [endEmbed], components: [] });
       if (winnerId) {
-        await msg.channel.send({ content: `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
+        await msg.channel.send({ content: rerolled ? `🎉 Reroll! Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` : `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
       } else {
         await msg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
       }
-      await deleteGiveaway(msgId);
+      // Only delete if not rerolled (so reroll can be used again)
+      if (!rerolled) {
+        await deleteGiveaway(msgId);
+      }
       if (deferred) {
-        await interaction.editReply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
+        await interaction.editReply({ content: rerolled ? `Giveaway rerolled! New winner: <@${winnerId}>` : `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
       } else {
-        await interaction.reply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}`, flags: 64 });
+        await interaction.reply({ content: rerolled ? `Giveaway rerolled! New winner: <@${winnerId}>` : `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}`, flags: 64 });
       }
     } catch (e) {
       console.error('endgiveaway error:', e);
