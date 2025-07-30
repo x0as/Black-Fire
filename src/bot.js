@@ -44,6 +44,14 @@ const giveawaySchema = new mongoose.Schema({
 });
 const Giveaway = mongoose.model('Giveaway', giveawaySchema);
 
+// MessageCount schema for leaderboards
+const messageCountSchema = new mongoose.Schema({
+  userId: String,
+  count: Number,
+  date: { type: String, default: null }
+});
+const MessageCount = mongoose.model('MessageCount', messageCountSchema);
+
 // Helper to get all giveaways as a map (for compatibility)
 async function getGiveawaysMap() {
   const docs = await Giveaway.find({});
