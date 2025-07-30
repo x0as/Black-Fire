@@ -22,7 +22,25 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
-client.login(TOKEN);
+
+// Enhanced error logging for Discord login
+async function loginBot() {
+  try {
+    if (!TOKEN) {
+      console.error('[ERROR] BOT_TOKEN is missing from environment variables.');
+      process.exit(1);
+    }
+    await client.login(TOKEN);
+    console.log('[INFO] Discord client login successful.');
+  } catch (err) {
+    console.error('[ERROR] Discord client login failed:', err);
+    if (err.code === 'TOKEN_INVALID' || (err.message && err.message.includes('Invalid token'))) {
+      console.error('[ERROR] The provided BOT_TOKEN is invalid.');
+    }
+    process.exit(1);
+  }
+}
+loginBot();
 let memory = {
   aiChannelId: null,
   giveaways: {},
@@ -32,7 +50,37 @@ let memory = {
 
 // MongoDB connection and schema
 const MONGO_URI = process.env.MONGO_URI;
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+mongoose.connection.on('error', err => {
+  console.error('[ERROR] MongoDB connection error:', err);
+});
+mongoose.connection.on('disconnected', () => {
+  console.error('[ERROR] MongoDB disconnected.');
+});
+mongoose.connection.on('connected', () => {
+  console.log('[INFO] MongoDB connected successfully.');
+});
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .catch(err => {
+    console.error('[ERROR] Initial MongoDB connection failed:', err);
+    process.exit(1);
+  });
+// Global error handlers for uncaught exceptions and rejections
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+client.on('error', (err) => {
+  console.error('[ERROR] Discord client error:', err);
+});
+client.on('shardError', (err, shardId) => {
+  console.error(`[ERROR] Discord shard error on shard ${shardId}:`, err);
+});
+client.on('warn', (info) => {
+  console.warn('[WARN] Discord client warning:', info);
+});
 const giveawaySchema = new mongoose.Schema({
   _id: String, // message id
   host: String,
