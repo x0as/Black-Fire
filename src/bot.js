@@ -275,6 +275,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Ignore if already replied/deferred
     }
   }
+
+  // --- Merge button logic from duplicate listener ---
+  if (interaction.isButton()) {
+    // Giveaway entry button logic
+    if (interaction.customId === 'enter_giveaway') {
+      const msgId = interaction.message.id;
+      const userId = interaction.user.id;
+      let g = await giveaways[msgId];
+      if (!g) {
+        await interaction.reply({ content: 'This giveaway is no longer active.', ephemeral: true });
+        return;
+      }
+      if (g.winner) {
+        await interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
+        return;
+      }
+      if (g.entrants.has(userId)) {
+        await interaction.reply({ content: 'You have already entered this giveaway!', ephemeral: true });
+        return;
+      }
+      g.entrants.add(userId);
+      await saveGiveaway(msgId, g);
+      // Update embed with new entry count
+      const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+      embed.setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
+      await interaction.message.edit({ embeds: [embed] });
+      await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
+      return;
+    }
+    // ...other button logic...
+    return;
+  }
   // /spadecult: Assign Spade Cult role to user
   if (interaction.commandName === 'spadecult') {
     const roleId = '1391511769842974870';
@@ -951,41 +983,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-const handleInteraction = require('./commands/interactionCommands');
-
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (interaction.isButton()) {
-    // Giveaway entry button logic
-    if (interaction.customId === 'enter_giveaway') {
-      const msgId = interaction.message.id;
-      const userId = interaction.user.id;
-      let g = await giveaways[msgId];
-      if (!g) {
-        await interaction.reply({ content: 'This giveaway is no longer active.', ephemeral: true });
-        return;
-      }
-      if (g.winner) {
-        await interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
-        return;
-      }
-      if (g.entrants.has(userId)) {
-        await interaction.reply({ content: 'You have already entered this giveaway!', ephemeral: true });
-        return;
-      }
-      g.entrants.add(userId);
-      await saveGiveaway(msgId, g);
-      // Update embed with new entry count
-      const embed = EmbedBuilder.from(interaction.message.embeds[0]);
-      embed.setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
-      await interaction.message.edit({ embeds: [embed] });
-      await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
-      return;
-    }
-    // ...other button logic...
-    return;
-  }
-  // ...existing code...
-});
+// ...existing code...
 
 client.on(Events.MessageCreate, async (message) => {
   // Prefix-based command for 7-day timeout
