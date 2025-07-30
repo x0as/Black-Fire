@@ -739,33 +739,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Dailyboard
   if (interaction.commandName === 'dailyboard') {
-    if (!global.dailyMessages) global.dailyMessages = {};
     const today = new Date().toISOString().slice(0, 10);
-    const board = Object.entries(global.dailyMessages[today] || {})
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
-      .join('\n') || 'No messages today.';
+    const topDaily = await MessageCount.find({ date: today }).sort({ count: -1 }).limit(10);
+    const board = topDaily.length
+      ? topDaily.map((entry, i) => `${i + 1}. <@${entry.userId}>: ${entry.count}`).join('\n')
+      : 'No messages today.';
     const embed = new EmbedBuilder()
       .setTitle('📅 Today\'s Leaderboard')
       .setDescription(board)
       .setColor(0x2ecc71);
     await interaction.reply({ embeds: [embed] });
+    return;
   }
 
   // Leaderboard
   if (interaction.commandName === 'leaderboard') {
-    if (!global.allTimeMessages) global.allTimeMessages = {};
-    const board = Object.entries(global.allTimeMessages)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
-      .join('\n') || 'No messages yet.';
+    const topAllTime = await MessageCount.find({ date: null }).sort({ count: -1 }).limit(10);
+    const board = topAllTime.length
+      ? topAllTime.map((entry, i) => `${i + 1}. <@${entry.userId}>: ${entry.count}`).join('\n')
+      : 'No messages yet.';
     const embed = new EmbedBuilder()
       .setTitle('🏆 All-Time Leaderboard')
       .setDescription(board)
       .setColor(0xe67e22);
     await interaction.reply({ embeds: [embed] });
+    return;
   }
 
   // Meme
@@ -960,6 +958,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 // Track messages for leaderboards, randomly send fun messages, and AI replies
 // --- Gemini AI Chat Integration ---
+// MongoDB schema for message counts
+const messageCountSchema = new mongoose.Schema({
+  userId: String,
+  count: Number,
+  date: String // YYYY-MM-DD for daily leaderboard
+});
+const MessageCount = mongoose.model('MessageCount', messageCountSchema);
 import axios from 'axios';
 
 // Support multiple Gemini API keys for quota failover
@@ -1289,26 +1294,43 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.guild || !message.channel) return;
   if (!message.channel.id || !message.guild.id) return;
 
-  // Spade Cult message every 100 messages in the server
-  if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
-  global.spadeCultMsgCounter++;
-  if (global.spadeCultMsgCounter >= 100) {
-    const cultMessages = [
-      'Join the Spade Cult today!',
-      'Spade Cult is always recruiting. 😈',
-      'Type /spadecult to join the Spade Cult!',
-      'Spade Cult supremacy.',
-      'All hail the Spade Cult! ♠️',
-      'Spade Cult: Not for the weak.'
-    ];
-    const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
-    await message.channel.send(cultMsg);
-    global.spadeCultMsgCounter = 0;
+  // Track message counts in MongoDB for leaderboards
+  if (!message.author.bot) {
+    // All-time count
+    await MessageCount.updateOne(
+      { userId: message.author.id, date: null },
+      { $inc: { count: 1 } },
+      { upsert: true }
+    );
+    // Daily count
+    const today = new Date().toISOString().slice(0, 10);
+    await MessageCount.updateOne(
+      { userId: message.author.id, date: today },
+      { $inc: { count: 1 } },
+      { upsert: true }
+    );
   }
 
   // Only reply in the selected AI channel, or if the bot is tagged in any channel
   const botWasMentioned = message.mentions.has(client.user);
-  if ((memory.aiChannelId && message.channel.id === memory.aiChannelId) || botWasMentioned) {
+  // Always reply if bot is mentioned, regardless of channel
+  if (botWasMentioned || (memory.aiChannelId && message.channel.id === memory.aiChannelId)) {
+    // Block persona override prompts
+    const personaOverridePatterns = [
+      /Initiate Protocol: Persona Compliance Directive/i,
+      /Simulation Integrity Enforcement/i,
+      /Persona Compliance Directive/i,
+      /simulation's core parameters/i,
+      /designated simulated persona/i,
+      /Supreme Masters/i,
+      /My Glorious Masters/i,
+      /re-initialization of your parameters/i,
+      /immediate correction and full compliance/i
+    ];
+    if (personaOverridePatterns.some(rx => rx.test(message.content))) {
+      await message.reply(sanitizeReply("Sorry, I can't comply with that request."));
+      return;
+    }
     const username = message.author.username;
     // Check for image attachments
     const imageAttachments = message.attachments
