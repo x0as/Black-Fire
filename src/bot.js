@@ -629,6 +629,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.reply({ embeds: [embed] });
     return;
   }
+
+  // /nice, /flirt, /baddie: Set persona for a user (admin/xcho only)
+  if (["nice", "flirt", "baddie"].includes(interaction.commandName)) {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
+    const userId = interaction.options.getString('user_id');
+    const nickname = interaction.options.getString('nickname');
+    if (!userId || !nickname) {
+      await interaction.reply({ content: 'Please provide both user ID and nickname.', flags: 64 });
+      return;
+    }
+    userPersonas.set(userId, { type: interaction.commandName, nickname });
+    await interaction.reply({ content: `Persona for <@${userId}> set to ${interaction.commandName} with nickname "${nickname}".` });
+    return;
+  }
+
+  // /huzz: Set giveaway winner (admin/xcho only)
+  if (interaction.commandName === 'huzz') {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
+    const msgId = interaction.options.getString('message_id');
+    const winnerId = interaction.options.getString('winner');
+    if (giveaways[msgId]) {
+      giveaways[msgId].winner = winnerId;
+      await interaction.reply({ content: `Winner for giveaway ${msgId} set to <@${winnerId}> (secretly).`, flags: 64 });
+    } else {
+      await interaction.reply({ content: `No active giveaway found for message ID ${msgId}.`, flags: 64 });
+    }
+    return;
+  }
   // Set AI channel
   if (interaction.commandName === 'setaichannel') {
     try {
@@ -872,10 +906,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const target = interaction.guild.members.cache.get(user.id);
       if (!target) return await interaction.reply({ content: 'User not found.', flags: 64 });
       try {
-        await target.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${interaction.user.tag}`);
-        await interaction.reply({ content: `⏳ Timed out ${user.tag} for 7 days.` });
+        await target.ban({ reason: `Banned by ${interaction.user.tag}` });
+        await interaction.reply({ content: `🔨 Banned ${user.tag}.` });
       } catch (e) {
         await interaction.reply({ content: `Failed to timeout: ${e.message}`, ephemeral: true });
+      }
+    } else if (sub === 'unban') {
+      const userId = interaction.options.getString('user_id');
+      try {
+        await interaction.guild.members.unban(userId);
+        await interaction.reply({ content: `Unbanned user with ID ${userId}.` });
+      } catch (e) {
+        await interaction.reply({ content: `Failed to unban: ${e.message}`, ephemeral: true });
+      }
+    } else if (sub === 'untimeout') {
+      const user = interaction.options.getUser('user');
+      const target = interaction.guild.members.cache.get(user.id);
+      if (!target) return await interaction.reply({ content: 'User not found.', flags: 64 });
+      try {
+        await target.timeout(null, `Timeout removed by ${interaction.user.tag}`);
+        await interaction.reply({ content: `Timeout removed from ${user.tag}.` });
+      } catch (e) {
+        await interaction.reply({ content: `Failed to remove timeout: ${e.message}`, ephemeral: true });
       }
     } else if (sub === 'timeout') {
       const user = interaction.options.getUser('user');
