@@ -1125,14 +1125,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 
-  // ...existing code...
-  // Before returning, log the AI response
-  // Example: const aiResponse = ...
-  // Add logging for response
-  // console.log('[Gemini Response]', aiResponse);
+  // --- Gemini API robust logging ---
+  const apiKey = getCurrentGeminiApiKey();
+  const payload = {
+    contents: [
+      { role: "system", parts: [{ text: systemPrompt }] },
+      ...history.map(h => ({ role: h.role, parts: [{ text: h.text }] })),
+      { role: "user", parts: [{ text: prompt }] },
+      { role: "system", parts: [{ text: modelPrompt }] }
+    ]
+  };
+  let aiResponse = "";
+  console.log('[Gemini API Request]', JSON.stringify(payload, null, 2));
+  try {
+    const res = await axios.post(
+      `${GEMINI_API_URL}?key=${apiKey}`,
+      payload,
+      { headers: { "Content-Type": "application/json" } }
+    );
+    console.log('[Gemini API Response]', res.data);
+    if (res.data && res.data.candidates && res.data.candidates.length > 0 && res.data.candidates[0].content && res.data.candidates[0].content.parts && res.data.candidates[0].content.parts.length > 0) {
+      aiResponse = res.data.candidates[0].content.parts[0].text;
+    }
+  } catch (err) {
+    console.error('[Gemini API Error]', err.response ? err.response.data : err);
+  }
+  console.log('[Gemini Final Response]', aiResponse);
 
-// Login the Discord client
-client.login(process.env.TOKEN);
+  // Login the Discord client
+  client.login(process.env.TOKEN);
 
 client.on(Events.MessageCreate, async (message) => {
   // Prefix-based command for 7-day timeout
