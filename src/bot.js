@@ -66,6 +66,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
   // Persona override from commands
   if (userPersonas.has(userId)) {
     const persona = userPersonas.get(userId);
+    console.log(`[Persona Debug] User: ${userId}, Type: ${persona.type}, Nickname: ${persona.nickname}`);
     if (persona.type === 'flirt') {
       systemPrompt = `You are Starfire, a super flirty, playful Discord egirl. You love teasing, flirting, and making the user blush. Use lots of heart emojis, pet names, and playful banter. Always keep it fun, never disrespect Islam. The user's nickname is "${persona.nickname}".`;
       modelPrompt = `Understood. Address the user as ${persona.nickname}, flirt heavily, tease, and use lots of playful language and emojis. Only mention your name if asked.`;
@@ -75,6 +76,10 @@ async function getTextResponse(prompt, channelId, username, userId) {
     } else if (persona.type === 'baddie') {
       systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's nickname is "${persona.nickname}".`;
       modelPrompt = `Understood. Address the user as ${persona.nickname}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+    } else {
+      // Fallback if persona type is invalid
+      systemPrompt = `You are Starfire, a Discord egirl. The user's nickname is "${persona.nickname}".`;
+      modelPrompt = `Understood. Address the user as ${persona.nickname}.`;
     }
   } else if (userId === '966695891178242139') {
     // Flirt heavy for this user
@@ -337,15 +342,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const userId = interaction.user.id;
       let g = await giveaways[msgId];
       if (!g) {
-        await interaction.reply({ content: 'This giveaway is no longer active.', ephemeral: true });
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: 'This giveaway is no longer active.', flags: 64 });
+          } else {
+            await interaction.followUp({ content: 'This giveaway is no longer active.', flags: 64 });
+          }
         return;
       }
       if (g.winner) {
-        await interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: 'This giveaway has already ended.', flags: 64 });
+          } else {
+            await interaction.followUp({ content: 'This giveaway has already ended.', flags: 64 });
+          }
         return;
       }
       if (g.entrants.has(userId)) {
-        await interaction.reply({ content: 'You have already entered this giveaway!', ephemeral: true });
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: 'You have already entered this giveaway!', flags: 64 });
+          } else {
+            await interaction.followUp({ content: 'You have already entered this giveaway!', flags: 64 });
+          }
         return;
       }
       g.entrants.add(userId);
@@ -354,7 +371,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const embed = EmbedBuilder.from(interaction.message.embeds[0]);
       embed.setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nEnds in ${Math.max(0, Math.floor((g.endTime - Date.now()) / 60000))} minutes!\nEntries: ${g.entrants.size}`);
       await interaction.message.edit({ embeds: [embed] });
-      await interaction.reply({ content: 'You have entered the giveaway!', ephemeral: true });
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'You have entered the giveaway!', flags: 64 });
+        } else {
+          await interaction.followUp({ content: 'You have entered the giveaway!', flags: 64 });
+        }
       return;
     }
     // ...other button logic...
