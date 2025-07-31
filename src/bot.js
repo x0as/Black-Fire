@@ -821,7 +821,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Update embed with real message ID
       embed.setFooter({ text: `Giveaway ID: ${giveawayMsg.id}` });
       await giveawayMsg.edit({ embeds: [embed] });
+
+      // Timer to update remaining time every 30 seconds
+      const updateInterval = setInterval(async () => {
+        try {
+          const g = await getGiveaway(giveawayMsg.id);
+          if (!g) {
+            clearInterval(updateInterval);
+            return;
+          }
+          const now = Date.now();
+          const minutesLeft = Math.max(0, Math.floor((g.endTime - now) / 60000));
+          const updatedEmbed = EmbedBuilder.from(giveawayMsg.embeds[0]);
+          updatedEmbed.setDescription(`Prize: ${g.prize}\nHost: <@${g.host}>\nEnds in ${minutesLeft} minutes!\nEntries: ${g.entrants.size}`);
+          await giveawayMsg.edit({ embeds: [updatedEmbed] });
+          if (minutesLeft <= 0) {
+            clearInterval(updateInterval);
+          }
+        } catch (e) {
+          clearInterval(updateInterval);
+        }
+      }, 30000);
+
       setTimeout(async () => {
+        clearInterval(updateInterval);
         try {
           const g = await getGiveaway(giveawayMsg.id);
           if (!g) return;
