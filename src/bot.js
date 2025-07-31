@@ -186,8 +186,8 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
 }
 
 async function getTextResponse(prompt, channelId, username, userId) {
-  let systemPrompt;
-  let modelPrompt;
+  let systemPrompt = undefined;
+  let modelPrompt = undefined;
   let history = getConversationContext(channelId);
   // Persona override from commands
   if (userPersonas.has(userId)) {
