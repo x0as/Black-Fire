@@ -60,14 +60,139 @@ function addToConversationHistory(channelId, role, text) {
 const userPersonas = new Map(); // userId -> { type: 'nice'|'flirt'|'baddie', nickname: string }
 
 async function getTextResponse(prompt, channelId, username, userId) {
+import axios from 'axios';
+
+// Support multiple Gemini API keys for quota failover
+const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8']).map(k => k.trim()).filter(Boolean);
+let geminiApiKeyIndex = 0;
+function getCurrentGeminiApiKey() {
+  return GEMINI_API_KEYS[geminiApiKeyIndex];
+}
+function rotateGeminiApiKey() {
+  geminiApiKeyIndex = (geminiApiKeyIndex + 1) % GEMINI_API_KEYS.length;
+}
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
+const GEMINI_API_VISION_URL = GEMINI_API_URL;
+
+const MESSAGE_HISTORY_SIZE = 10;
+const conversationHistory = new Map();
+
+function sanitizeReply(content) {
+  content = content.replace(/@everyone/g, 'everyone');
+  content = content.replace(/@here/g, 'here');
+  content = content.replace(/<@&?\d+>/g, '[ping removed]');
+  return content;
+}
+
+function getConversationContext(channelId) {
+  if (!conversationHistory.has(channelId)) {
+    conversationHistory.set(channelId, []);
+  }
+  return conversationHistory.get(channelId);
+}
+
+function addToConversationHistory(channelId, role, text) {
+  const history = getConversationContext(channelId);
+  history.push({ role, text });
+  if (history.length > MESSAGE_HISTORY_SIZE) {
+    history.shift();
+  }
+}
+
+async function downloadImageToBase64(url) {
+  return new Promise((resolve, reject) => {
+    require('https').get(url, (res) => {
+      const data = [];
+      res.on('data', chunk => data.push(chunk));
+      res.on('end', () => {
+        const buffer = Buffer.concat(data);
+        resolve(buffer.toString('base64'));
+      });
+    }).on('error', reject);
+  });
+}
+
+// --- Persona state ---
+const userPersonas = new Map(); // userId -> { type: 'nice'|'flirt'|'baddie', nickname: string }
+
+async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
+  const contents = [
+    {
+      role: "user",
+      parts: [
+        {
+          text: `You are Starfire, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Reply in a fun, warm, and human-like way. Use natural, casual punctuation and spelling like a real person. Keep your replies short and easy to read, like a quick Discord message. You love making new friends, telling jokes, and keeping conversations light-hearted. If someone asks your name, say "My name is Starfire!" Never mention Google or Gemini in your replies. The user's name is "${username}".`
+        }
+      ]
+    }
+  ];
+  for (let i = 0; i < base64Images.length; i++) {
+    contents.push({
+      role: "user",
+      parts: [
+        {
+          inline_data: {
+            mime_type: mimeTypes[i] || "image/png",
+            data: base64Images[i]
+          }
+        }
+      ]
+    });
+  }
+  contents.push({
+    role: "user",
+    parts: [{ text: prompt }]
+  });
+  let lastError;
+  let attempts = 0;
+  while (attempts < GEMINI_API_KEYS.length) {
+    const apiKey = getCurrentGeminiApiKey();
+    try {
+      const response = await axios.post(
+        `${GEMINI_API_VISION_URL}?key=${apiKey}`,
+        {
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 800,
+          }
+        }
+      );
+      if (response.data &&
+        response.data.candidates &&
+        response.data.candidates[0] &&
+        response.data.candidates[0].content &&
+        response.data.candidates[0].content.parts) {
+        return response.data.candidates[0].content.parts[0].text;
+      }
+      return "Sorry, I couldn't generate a response at this time.";
+    } catch (error) {
+      lastError = error;
+      if (error.response && error.response.data &&
+          (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
+           error.response.data.error?.message?.toLowerCase().includes('quota'))) {
+        console.warn('Gemini API quota exceeded, rotating to next key...');
+        rotateGeminiApiKey();
+        attempts++;
+        continue;
+      }
+      // Other errors, break
+      break;
+    }
+  }
+  console.error('Error getting Gemini Vision response:', lastError?.response?.data || lastError?.message);
+  return "Sorry, I encountered an error processing your image.";
+}
+
+async function getTextResponse(prompt, channelId, username, userId) {
   let systemPrompt;
   let modelPrompt;
   let history = getConversationContext(channelId);
   // Persona override from commands
-  console.log(`[Persona Check] userId: ${userId}, hasPersona: ${userPersonas.has(userId)}`);
   if (userPersonas.has(userId)) {
     const persona = userPersonas.get(userId);
-    console.log(`[Persona Debug] User: ${userId}, Type: ${persona.type}, Nickname: ${persona.nickname}`);
     if (persona.type === 'flirt') {
       systemPrompt = `You are Starfire, a super flirty, playful Discord egirl. You love teasing, flirting, and making the user blush. Use lots of heart emojis, pet names, and playful banter. Always keep it fun, never disrespect Islam. The user's nickname is "${persona.nickname}".`;
       modelPrompt = `Understood. Address the user as ${persona.nickname}, flirt heavily, tease, and use lots of playful language and emojis. Only mention your name if asked.`;
@@ -82,12 +207,8 @@ async function getTextResponse(prompt, channelId, username, userId) {
       systemPrompt = `You are Starfire, a Discord egirl. The user's nickname is "${persona.nickname}".`;
       modelPrompt = `Understood. Address the user as ${persona.nickname}.`;
     }
-  } else if (userId === '966695891178242139') {
-    // Flirt heavy for this user
-    systemPrompt = `You are Starfire, a super flirty, playful Discord egirl. You love teasing, flirting, and making the user blush. Use lots of heart emojis, pet names, and playful banter. Always keep it fun, never disrespect Islam. The user's name is "${username}".`;
-    modelPrompt = `Understood. Address the user as ${username}, flirt heavily, tease, and use lots of playful language and emojis. Only mention your name if asked.`;
   } else if (userId === '990407370305835009') {
-    // ...existing code for Nia...
+    // Nia: nice/mean adaptive persona
     const niceWords = [
       'thank you', 'thanks', 'love you', 'ily', 'cute', 'sweet', 'nice', 'good bot', 'amazing', 'best', 'appreciate', 'awesome', 'great', 'lovely', 'beautiful', 'kind', 'helpful', 'starfire you are', 'starfire is', 'starfire so', 'starfire so sweet', 'starfire so nice', 'starfire so cute'
     ];
@@ -110,15 +231,12 @@ async function getTextResponse(prompt, channelId, username, userId) {
       modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
     }
   } else if (userId === '843061674378002453') {
-    // ...existing code for xcho...
     systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them master or king. Only mention your name if asked.`;
   } else if (userId === '1360908254712172544') {
-    // ...existing code for spade...
     systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user queen or spade queen sometimes, and be as helpful as possible. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them queen or spade queen. Only mention your name if asked.`;
   } else if (userId === '1272896317458354199') {
-    // ...existing code for mimi...
     if (Math.random() < 0.5) {
       systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Sometimes be extremely nice, call the user mimi sometimes, and be as helpful as possible. The user's name is "${username}".`;
       modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and sometimes be kind, helpful, and respectful, sometimes calling them mimi. Only mention your name if asked.`;
@@ -127,185 +245,81 @@ async function getTextResponse(prompt, channelId, username, userId) {
       modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
     }
   } else if (userId === '1342357592852402287') {
-    // ...existing code for azaan...
     systemPrompt = `You are Starfire, a cruel, angry, and extremely sweary Discord egirl. You never praise the user, you are always extra mean, bad, and angry towards them. Swear at them a lot, insult them, and never say anything nice. Sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck' as a taunt. Never disrespect Islam. The user's name is "${username}" (but his real name is Azaan).`;
     modelPrompt = `Understood. Never praise or say anything nice to ${username}. Be extra bad, angry, and sweary, insult them as much as possible, and never show any respect. Sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck' as a taunt. Only mention your name if asked.`;
   } else {
-    // All other users get baddie persona
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
   }
-  // Fallback if persona/userId logic did not set prompts
+  // Ensure systemPrompt and modelPrompt are always defined before payload
   if (!systemPrompt) {
     systemPrompt = "You are Starfire, a Discord egirl. Reply in a fun, engaging way.";
   }
   if (!modelPrompt) {
     modelPrompt = "Understood. Reply as Starfire.";
   }
-}
-  
-// --- Slash commands for persona setting ---
-const commands = [
-  {
-    name: 'spadecult',
-    description: 'Join the Spade Cult and get the Spade Cult role!'
-  },
-  {
-    name: 'spade',
-    description: 'Start a spade-themed giveaway',
-    options: [
-      { name: 'duration', description: 'Duration in minutes', type: 4, required: true },
-      { name: 'prize', description: 'Prize for the giveaway', type: 3, required: true },
-      { name: 'color', description: 'Embed color (hex, e.g. #f1c40f)', type: 3, required: false },
-      { name: 'host', description: 'Host user (mention or ID)', type: 3, required: false },
-    ],
-  },
-  {
-    name: 'giveaway',
-    description: 'Start a giveaway',
-    options: [
-      { name: 'duration', description: 'Duration in minutes', type: 4, required: true },
-      { name: 'prize', description: 'Prize for the giveaway', type: 3, required: true },
-      { name: 'color', description: 'Embed color (hex, e.g. #f1c40f)', type: 3, required: false },
-      { name: 'host', description: 'Host user (mention or ID)', type: 3, required: false },
-    ],
-  },
-  {
-    name: 'nice',
-    description: 'Set Starfire to be super nice to a user',
-    options: [
-      { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
-    ]
-  },
-  {
-    name: 'flirt',
-    description: 'Set Starfire to flirt heavily with a user',
-    options: [
-      { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
-    ]
-  },
-  {
-    name: 'baddie',
-    description: 'Set Starfire to be a baddie to a user',
-    options: [
-      { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
-    ]
-  },
-  {
-    name: '8ball', description: 'Ask the magic 8-ball a question', options: [{ name: 'question', description: 'Your question', type: 3, required: true }] },
-  { name: 'coinflip', description: 'Flips a coin' },
-  { name: 'dailyboard', description: "Shows today's message leaderboard." },
-  { name: 'leaderboard', description: 'Shows the all-time message leaderboard.' },
-  { name: 'meme', description: 'Get a random meme from Reddit.' },
-  { name: 'mod', description: 'Moderation commands', options: [
-    { name: 'ban', description: 'Ban a user', type: 1, options: [{ name: 'user', description: 'User to ban', type: 6, required: true }] },
-    { name: 'unban', description: 'Unban a user by ID', type: 1, options: [{ name: 'user_id', description: 'User ID to unban', type: 3, required: true }] },
-    { name: 'kick', description: 'Kick a user', type: 1, options: [{ name: 'user', description: 'User to kick', type: 6, required: true }] },
-    { name: 'mute', description: 'Mute a user', type: 1, options: [
-      { name: 'user', description: 'User to mute', type: 6, required: true },
-      { name: 'duration', description: 'Duration in minutes', type: 4, required: true }
-    ] },
-    { name: 'timeout', description: 'Timeout a user', type: 1, options: [
-      { name: 'user', description: 'User to timeout', type: 6, required: true },
-      { name: 'duration', description: 'Duration in minutes (max 10080)', type: 4, required: true }
-    ] },
-    { name: 'untimeout', description: 'Remove timeout from a user', type: 1, options: [
-      { name: 'user', description: 'User to remove timeout from', type: 6, required: true }
-    ] },
-    { name: 'purge', description: 'Delete messages', type: 1, options: [
-      { name: 'amount', description: 'Number of messages to delete', type: 4, required: true }
-    ] },
-  ] },
-  { name: 'ping', description: "Check the bot's latency." },
-  { name: 'reactionrole', description: 'Reaction role commands', options: [
-    { name: 'add', description: 'Set up a new reaction role', type: 1 },
-    { name: 'remove', description: 'Remove a reaction role', type: 1 }
-  ] },
-  { name: 'role', description: 'Role management', options: [
-    { name: 'add', description: 'Add a role to a member', type: 1, options: [
-      { name: 'user', description: 'User to add role to', type: 6, required: true },
-      { name: 'role', description: 'Role to add', type: 8, required: true }
-    ] },
-    { name: 'remove', description: 'Remove a role from a member', type: 1, options: [
-      { name: 'user', description: 'User to remove role from', type: 6, required: true },
-      { name: 'role', description: 'Role to remove', type: 8, required: true }
-    ] }
-  ] },
-  { name: 'serverinfo', description: 'Get information about the server.' },
-  { name: 'uptime', description: 'Shows how long the bot has been online.' },
-  { name: 'userinfo', description: 'Get information about a user.', options: [
-    { name: 'user', description: 'User to get info about', type: 6, required: false }
-  ] },
-
-  {
-    name: 'setaichannel',
-    description: 'Set a channel for Gemini AI to answer everything',
-    options: [
-      { name: 'channel', description: 'Channel to enable Gemini AI', type: 7, required: true }
-    ]
-  },
-  {
-    name: 'removeaichannel',
-    description: 'Remove the AI channel (disable Starfire AI replies).'
-  },
-  {
-    name: 'commands',
-    description: 'List all supported commands.'
-  },
-  {
-    name: 'status',
-    description: 'Change the bot\'s Playing status',
-    options: [
-      { name: 'text', description: 'Status text', type: 3, required: true }
-    ]
+  const contents = [
+    {
+      role: "user",
+      parts: [{ text: systemPrompt }]
+    },
+    {
+      role: "model",
+      parts: [{ text: modelPrompt }]
+    }
+  ];
+  for (const msg of history) {
+    contents.push({
+      role: msg.role === "bot" ? "model" : "user",
+      parts: [{ text: msg.text }]
+    });
   }
-  ,
-  {
-    name: 'huzz',
-    description: 'huzzhuzzhuzz',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-      { name: 'winner', description: 'Winner user ID', type: 3, required: true }
-    ]
+  contents.push({
+    role: "user",
+    parts: [{ text: prompt }]
+  });
+  let lastError;
+  let attempts = 0;
+  while (attempts < GEMINI_API_KEYS.length) {
+    const apiKey = getCurrentGeminiApiKey();
+    try {
+      const response = await axios.post(
+        `${GEMINI_API_URL}?key=${apiKey}`,
+        {
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 800,
+          }
+        }
+      );
+      if (response.data &&
+        response.data.candidates &&
+        response.data.candidates[0] &&
+        response.data.candidates[0].content &&
+        response.data.candidates[0].content.parts) {
+        return response.data.candidates[0].content.parts[0].text;
+      }
+      return "Sorry, I couldn't generate a response at this time.";
+    } catch (error) {
+      lastError = error;
+      if (error.response && error.response.data &&
+          (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
+           error.response.data.error?.message?.toLowerCase().includes('quota'))) {
+        console.warn('Gemini API quota exceeded, rotating to next key...');
+        rotateGeminiApiKey();
+        attempts++;
+        continue;
+      }
+      // Other errors, break
+      break;
+    }
   }
-];
-
-// Store AI channel ID
-// Store bot memory (e.g., AI channel ID)
-// --- Utility: sanitizeReply ---
-function sanitizeReply(text) {
-  if (!text) return '';
-  // Remove Discord @everyone/@here mentions and limit length
-  return text.replace(/@(everyone|here)/g, '@3$1').slice(0, 2000);
+  console.error('Error getting Gemini response:', lastError?.response?.data || lastError?.message);
+  return "Sorry, I encountered an error processing your request.";
 }
-
-// --- Giveaway Storage ---
-const giveaways = {};
-
-// Save giveaway state (in-memory, not persistent)
-async function saveGiveaway(id, data) {
-  giveaways[id] = {
-    ...data,
-    entrants: data.entrants || new Set(),
-    winner: data.winner || null,
-    color: data.color || null,
-    prize: data.prize || '',
-    host: data.host || '',
-    endTime: data.endTime || Date.now() + 60000
-  };
-}
-
-// Get giveaway by ID
-async function getGiveaway(id) {
-  return giveaways[id];
-}
-
-// Delete giveaway by ID
-async function deleteGiveaway(id) {
-  delete giveaways[id];
 }
 const memory = {
   aiChannelId: null
