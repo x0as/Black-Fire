@@ -258,7 +258,7 @@ const commands = [
   ,
   {
     name: 'huzz',
-    description: 'Set the winner for a giveaway (admin/xcho only)',
+    description: 'huzzhuzzhuzz',
     options: [
       { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
       { name: 'winner', description: 'Winner user ID', type: 3, required: true }
