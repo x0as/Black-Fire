@@ -64,6 +64,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
   let modelPrompt;
   let history = getConversationContext(channelId);
   // Persona override from commands
+  console.log(`[Persona Check] userId: ${userId}, hasPersona: ${userPersonas.has(userId)}`);
   if (userPersonas.has(userId)) {
     const persona = userPersonas.get(userId);
     console.log(`[Persona Debug] User: ${userId}, Type: ${persona.type}, Nickname: ${persona.nickname}`);
@@ -1092,7 +1093,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 
-// ...existing code...
+  // ...existing code...
+  // Before returning, log the AI response
+  // Example: const aiResponse = ...
+  // Add logging for response
+  // console.log('[Gemini Response]', aiResponse);
 
 // Login the Discord client
 client.login(process.env.TOKEN);
