@@ -1,5 +1,14 @@
 // --- Gemini AI Chat Integration ---
+
+import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
+import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import axios from 'axios';
+import express from 'express';
+
+dotenv.config();
+
+// --- Gemini AI Chat Integration ---
 
 // Support multiple Gemini API keys for quota failover
 const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8']).map(k => k.trim()).filter(Boolean);
@@ -30,14 +39,32 @@ function addToConversationHistory(channelId, role, text) {
   }
 }
 
+// --- Persona state ---
+const userPersonas = new Map(); // userId -> { type: 'nice'|'flirt'|'baddie', nickname: string }
+
 async function getTextResponse(prompt, channelId, username, userId) {
-  // Persona logic for baddie/egirl Starfire
   let systemPrompt;
   let modelPrompt;
   let history = getConversationContext(channelId);
-  // Custom persona for specific users
-  if (userId === '990407370305835009') {
-    // Nia: nice/mean adaptive persona
+  // Persona override from commands
+  if (userPersonas.has(userId)) {
+    const persona = userPersonas.get(userId);
+    if (persona.type === 'flirt') {
+      systemPrompt = `You are Starfire, a super flirty, playful Discord egirl. You love teasing, flirting, and making the user blush. Use lots of heart emojis, pet names, and playful banter. Always keep it fun, never disrespect Islam. The user's nickname is "${persona.nickname}".`;
+      modelPrompt = `Understood. Address the user as ${persona.nickname}, flirt heavily, tease, and use lots of playful language and emojis. Only mention your name if asked.`;
+    } else if (persona.type === 'nice') {
+      systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user ${persona.nickname} sometimes, and be as helpful as possible. The user's nickname is "${persona.nickname}".`;
+      modelPrompt = `Understood. Address the user as ${persona.nickname}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful. Only mention your name if asked.`;
+    } else if (persona.type === 'baddie') {
+      systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's nickname is "${persona.nickname}".`;
+      modelPrompt = `Understood. Address the user as ${persona.nickname}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+    }
+  } else if (userId === '966695891178242139') {
+    // Flirt heavy for this user
+    systemPrompt = `You are Starfire, a super flirty, playful Discord egirl. You love teasing, flirting, and making the user blush. Use lots of heart emojis, pet names, and playful banter. Always keep it fun, never disrespect Islam. The user's name is "${username}".`;
+    modelPrompt = `Understood. Address the user as ${username}, flirt heavily, tease, and use lots of playful language and emojis. Only mention your name if asked.`;
+  } else if (userId === '990407370305835009') {
+    // ...existing code for Nia...
     const niceWords = [
       'thank you', 'thanks', 'love you', 'ily', 'cute', 'sweet', 'nice', 'good bot', 'amazing', 'best', 'appreciate', 'awesome', 'great', 'lovely', 'beautiful', 'kind', 'helpful', 'starfire you are', 'starfire is', 'starfire so', 'starfire so sweet', 'starfire so nice', 'starfire so cute'
     ];
@@ -50,41 +77,34 @@ async function getTextResponse(prompt, channelId, username, userId) {
     for (const w of niceWords) if (lowerPrompt.includes(w)) isNice = true;
     for (const w of meanWords) if (lowerPrompt.includes(w)) isMean = true;
     if (isMean) {
-      // Baddie persona if mean
       systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}" (Nia).`;
       modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
     } else if (isNice || Math.random() < 0.75) {
-      // Nice persona 75% of the time (or if nice)
       systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user Nia sometimes, and be as helpful as possible. The user's name is "${username}" (Nia).`;
       modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, and always be kind, helpful, and respectful. Only mention your name if asked.`;
     } else {
-      // Baddie persona 25% of the time
       systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}" (Nia).`;
       modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
     }
-  }
-  // Special persona logic
-  if (userId === '843061674378002453') {
-    // xcho: master/king
+  } else if (userId === '843061674378002453') {
+    // ...existing code for xcho...
     systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them master or king. Only mention your name if asked.`;
   } else if (userId === '1360908254712172544') {
-    // spade: queen
+    // ...existing code for spade...
     systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user queen or spade queen sometimes, and be as helpful as possible. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them queen or spade queen. Only mention your name if asked.`;
   } else if (userId === '1272896317458354199') {
-    // mimi: sometimes nice, sometimes baddie
+    // ...existing code for mimi...
     if (Math.random() < 0.5) {
-      // Niceqa
       systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Sometimes be extremely nice, call the user mimi sometimes, and be as helpful as possible. The user's name is "${username}".`;
       modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and sometimes be kind, helpful, and respectful, sometimes calling them mimi. Only mention your name if asked.`;
     } else {
-      // Baddie
       systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
       modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
     }
   } else if (userId === '1342357592852402287') {
-    // Special: never praise, be extra bad, angry, and sweary, sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck'
+    // ...existing code for azaan...
     systemPrompt = `You are Starfire, a cruel, angry, and extremely sweary Discord egirl. You never praise the user, you are always extra mean, bad, and angry towards them. Swear at them a lot, insult them, and never say anything nice. Sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck' as a taunt. Never disrespect Islam. The user's name is "${username}" (but his real name is Azaan).`;
     modelPrompt = `Understood. Never praise or say anything nice to ${username}. Be extra bad, angry, and sweary, insult them as much as possible, and never show any respect. Sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck' as a taunt. Only mention your name if asked.`;
   } else {
@@ -92,78 +112,42 @@ async function getTextResponse(prompt, channelId, username, userId) {
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
   }
-  const contents = [
-    {
-      role: "user",
-      parts: [{ text: systemPrompt }]
-    },
-    {
-      role: "model",
-      parts: [{ text: modelPrompt }]
-    }
-  ];
-  for (const msg of history) {
-    contents.push({
-      role: msg.role === "bot" ? "model" : "user",
-      parts: [{ text: msg.text }]
-    });
-  }
-  contents.push({
-    role: "user",
-    parts: [{ text: prompt }]
-  });
-  let lastError;
-  let attempts = 0;
-  while (attempts < GEMINI_API_KEYS.length) {
-    const apiKey = getCurrentGeminiApiKey();
-    try {
-      const response = await axios.post(
-        `${GEMINI_API_URL}?key=${apiKey}`,
-        {
-          contents,
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 800,
-          }
-        }
-      );
-      if (response.data &&
-        response.data.candidates &&
-        response.data.candidates[0] &&
-        response.data.candidates[0].content &&
-        response.data.candidates[0].content.parts) {
-        return response.data.candidates[0].content.parts[0].text;
-      }
-      return "Sorry, I couldn't generate a response at this time.";
-    } catch (error) {
-      lastError = error;
-      if (error.response && error.response.data &&
-          (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
-           error.response.data.error?.message?.toLowerCase().includes('quota'))) {
-        console.warn('Gemini API quota exceeded, rotating to next key...');
-        rotateGeminiApiKey();
-        attempts++;
-        continue;
-      }
-      // Other errors, break
-      break;
-    }
-  }
-  console.error('Error getting Gemini response:', lastError?.response?.data || lastError?.message);
-  return "Sorry, I encountered an error processing your request.";
 }
-// ...existing code...
+  
+// --- Slash commands for persona setting ---
+commands.push(
+  {
+    name: 'nice',
+    description: 'Set Starfire to be super nice to a user',
+    options: [
+      { name: 'user_id', description: 'User ID', type: 3, required: true },
+      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
+    ]
+  },
+  {
+    name: 'flirt',
+    description: 'Set Starfire to flirt heavily with a user',
+    options: [
+      { name: 'user_id', description: 'User ID', type: 3, required: true },
+      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
+    ]
+  },
+  {
+    name: 'baddie',
+    description: 'Set Starfire to be a baddie to a user',
+    options: [
+      { name: 'user_id', description: 'User ID', type: 3, required: true },
+      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
+    ]
+  }
+);
 
 // Sanitize reply to avoid unwanted mentions and formatting issues
 function sanitizeReply(text) {
   if (!text) return '';
   // Prevent @everyone, @here, and mass mentions
-  return text.replace(/@(everyone|here|[0-9]{18,})/g, '@3$1');
+  return text.replace(/@(everyone|here|[0-9]{18,})/g, '@[ping removed]');
 }
-import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
-import fs from 'fs';
 import mongoose from 'mongoose';
 import express from 'express';
 import dotenv from 'dotenv';
@@ -275,7 +259,7 @@ async function getGiveawaysMap() {
       endTime: doc.endTime,
       entrants: new Set(doc.entrants),
       winner: doc.winner,
-      color: doc.color
+      color: doc.color,
     };
   }
   return map;
@@ -291,7 +275,7 @@ async function getGiveaway(id) {
     endTime: doc.endTime,
     entrants: new Set(doc.entrants),
     winner: doc.winner,
-    color: doc.color
+    color: doc.color,
   };
 }
 
@@ -677,21 +661,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // If giveaway is already ended (winner exists), reroll and announce new winner
     let winnerId;
     let rerolled = false;
-    if (g.winner && g.entrants.size > 1) {
-      // Reroll: pick a new winner different from previous
-      let entrantsArr = Array.from(g.entrants).filter(id => id !== g.winner);
-      winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
-      g.winner = winnerId;
-      rerolled = true;
-      await saveGiveaway(msgId, g);
-    } else if (!g.winner && g.entrants.size > 0) {
+    if (g.winner) {
+      // Winner was set (possibly by /huzz), just announce that winner
+      winnerId = g.winner;
+    } else if (g.entrants.size > 0) {
       // Normal end: pick winner
       let entrantsArr = Array.from(g.entrants);
       winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
       g.winner = winnerId;
       await saveGiveaway(msgId, g);
     } else {
-      winnerId = g.winner;
+      winnerId = null;
     }
     const endEmbed = new EmbedBuilder()
       .setTitle(rerolled ? '🎉 GIVEAWAY REROLLED 🎉' : '🎉 GIVEAWAY ENDED 🎉')
@@ -702,18 +682,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const msg = await interaction.channel.messages.fetch(msgId);
       await msg.edit({ embeds: [endEmbed], components: [] });
       if (winnerId) {
-        await msg.channel.send({ content: rerolled ? `🎉 Reroll! Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` : `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
+        await msg.channel.send({ content: `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
       } else {
         await msg.channel.send({ content: `No one entered the giveaway for **${g.prize}**.` });
       }
-      // Only delete if not rerolled (so reroll can be used again)
-      if (!rerolled) {
-        await deleteGiveaway(msgId);
-      }
+      // Delete giveaway after ending
+      await deleteGiveaway(msgId);
       if (deferred) {
-        await interaction.editReply({ content: rerolled ? `Giveaway rerolled! New winner: <@${winnerId}>` : `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
+        await interaction.editReply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
       } else {
-        await interaction.reply({ content: rerolled ? `Giveaway rerolled! New winner: <@${winnerId}>` : `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}`, flags: 64 });
+        await interaction.reply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}`, flags: 64 });
       }
     } catch (e) {
       console.error('endgiveaway error:', e);
