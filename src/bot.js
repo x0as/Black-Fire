@@ -60,8 +60,8 @@ function addToConversationHistory(channelId, role, text) {
 const userPersonas = new Map(); // userId -> { type: 'nice'|'flirt'|'baddie', nickname: string }
 
 async function getTextResponse(prompt, channelId, username, userId) {
-  let systemPrompt;
-  let modelPrompt;
+  let systemPrompt = "You are Starfire, a Discord egirl.";
+  let modelPrompt = "Understood. Reply as Starfire.";
   let history = getConversationContext(channelId);
   // Persona override from commands
   console.log(`[Persona Check] userId: ${userId}, hasPersona: ${userPersonas.has(userId)}`);
