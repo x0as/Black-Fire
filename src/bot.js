@@ -148,9 +148,6 @@ function sanitizeReply(text) {
   // Prevent @everyone, @here, and mass mentions
   return text.replace(/@(everyone|here|[0-9]{18,})/g, '@[ping removed]');
 }
-import mongoose from 'mongoose';
-import express from 'express';
-import dotenv from 'dotenv';
 dotenv.config();
 
 // Express web service for uptime monitoring
