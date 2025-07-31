@@ -1,6 +1,16 @@
 // --- Gemini AI Chat Integration ---
 
 import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
+// Initialize Discord client
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
+});
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import axios from 'axios';
@@ -248,12 +258,18 @@ async function registerCommands() {
   }
 }
 
+
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
   registerCommands();
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Helper to check admin/xcho
+  function isAdminOrXcho(interaction) {
+    const member = interaction.guild?.members.cache.get(interaction.user.id);
+    return (member && member.permissions.has('Administrator')) || interaction.user.id === '843061674378002453';
+  }
   // Defer reply for all commands that may take time
   const slowCommands = [
     'setaichannel', 'removeaichannel', 'editgiveaway', 'deletegiveaway', 'endgiveaway', 'giveaway', 'spade'
@@ -304,6 +320,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
   // /spadecult: Assign Spade Cult role to user
   if (interaction.commandName === 'spadecult') {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
     const roleId = '1391511769842974870';
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const role = interaction.guild.roles.cache.get(roleId);
@@ -341,6 +361,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
   // Edit Giveaway
   if (interaction.commandName === 'editgiveaway') {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -394,6 +418,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Delete Giveaway
   if (interaction.commandName === 'deletegiveaway') {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -432,6 +460,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // End Giveaway
   if (interaction.commandName === 'endgiveaway') {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -497,6 +529,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Reroll Giveaway
   if (interaction.commandName === 'reroll') {
+    if (!isAdminOrXcho(interaction)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+      return;
+    }
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -634,14 +670,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Giveaway and Spade Giveaway
   if (interaction.commandName === 'giveaway' || interaction.commandName === 'spade') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    if (!isAdminOrXcho(interaction)) {
       await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
-    // Restrict /spade command to specific user IDs
+    // Restrict /spade command to specific user IDs (keep original logic for extra restriction)
     if (interaction.commandName === 'spade') {
       const allowedIds = ['1360908254712172544', '1396937647074709577', '843061674378002453'];
       if (!allowedIds.includes(interaction.user.id)) {
@@ -720,10 +753,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Huzz
   if (interaction.commandName === 'huzz') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    if (!isAdminOrXcho(interaction)) {
       await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
@@ -809,11 +839,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Mod commands
   if (interaction.commandName === 'mod') {
-    // Permission check: must have Administrator or be user 843061674378002453
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    if (!isAdminOrXcho(interaction)) {
       await interaction.reply({ content: 'You do not have permission to use moderation commands.', flags: 64 });
       return;
     }
@@ -897,10 +923,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Reactionrole
   if (interaction.commandName === 'reactionrole') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    if (!isAdminOrXcho(interaction)) {
       await interaction.reply({ content: 'You do not have permission to use reaction role commands.', ephemeral: true });
       return;
     }
@@ -972,7 +995,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+
 // ...existing code...
+
+// Login the Discord client
+client.login(process.env.TOKEN);
 
 client.on(Events.MessageCreate, async (message) => {
   // Prefix-based command for 7-day timeout
