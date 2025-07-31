@@ -1,3 +1,9 @@
+// --- Placeholder for AI response function ---
+// Replace with actual Gemini/AI integration as needed
+async function getTextResponse(prompt, channelId, username, userId) {
+  // For now, just echo the prompt or return a default message
+  return `Starfire (AI) would reply to: "${prompt}"`;
+}
 // --- Helper functions for AI chat ---
 // Simple conversation history tracker (in-memory, per channel)
 const conversationHistory = {};
