@@ -247,7 +247,10 @@ const commands = [
 ];
 
 // Store AI channel ID
-let aiChannelId = null;
+// Store bot memory (e.g., AI channel ID)
+const memory = {
+  aiChannelId: null
+};
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
