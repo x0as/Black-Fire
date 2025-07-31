@@ -1,20 +1,160 @@
-// --- Placeholder for AI response function ---
-// Replace with actual Gemini/AI integration as needed
-async function getTextResponse(prompt, channelId, username, userId) {
-  // For now, just echo the prompt or return a default message
-  return `Starfire (AI) would reply to: "${prompt}"`;
+// --- Gemini AI Chat Integration ---
+import axios from 'axios';
+
+// Support multiple Gemini API keys for quota failover
+const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8']).map(k => k.trim()).filter(Boolean);
+let geminiApiKeyIndex = 0;
+function getCurrentGeminiApiKey() {
+  return GEMINI_API_KEYS[geminiApiKeyIndex];
 }
-// --- Helper functions for AI chat ---
-// Simple conversation history tracker (in-memory, per channel)
-const conversationHistory = {};
-function addToConversationHistory(channelId, role, content) {
-  if (!conversationHistory[channelId]) conversationHistory[channelId] = [];
-  conversationHistory[channelId].push({ role, content });
-  // Limit history to last 20 messages per channel
-  if (conversationHistory[channelId].length > 20) {
-    conversationHistory[channelId] = conversationHistory[channelId].slice(-20);
+function rotateGeminiApiKey() {
+  geminiApiKeyIndex = (geminiApiKeyIndex + 1) % GEMINI_API_KEYS.length;
+}
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
+
+const MESSAGE_HISTORY_SIZE = 10;
+const conversationHistory = new Map();
+
+function getConversationContext(channelId) {
+  if (!conversationHistory.has(channelId)) {
+    conversationHistory.set(channelId, []);
+  }
+  return conversationHistory.get(channelId);
+}
+
+function addToConversationHistory(channelId, role, text) {
+  const history = getConversationContext(channelId);
+  history.push({ role, text });
+  if (history.length > MESSAGE_HISTORY_SIZE) {
+    history.shift();
   }
 }
+
+async function getTextResponse(prompt, channelId, username, userId) {
+  // Persona logic for baddie/egirl Starfire
+  let systemPrompt;
+  let modelPrompt;
+  let history = getConversationContext(channelId);
+  // Custom persona for specific users
+  if (userId === '990407370305835009') {
+    // Nia: nice/mean adaptive persona
+    const niceWords = [
+      'thank you', 'thanks', 'love you', 'ily', 'cute', 'sweet', 'nice', 'good bot', 'amazing', 'best', 'appreciate', 'awesome', 'great', 'lovely', 'beautiful', 'kind', 'helpful', 'starfire you are', 'starfire is', 'starfire so', 'starfire so sweet', 'starfire so nice', 'starfire so cute'
+    ];
+    const meanWords = [
+      'stupid', 'dumb', 'hate', 'annoying', 'bad bot', 'useless', 'shut up', 'idiot', 'bitch', 'ugly', 'mid', 'lame', 'trash', 'fuck you', 'starfire you suck', 'starfire is dumb', 'starfire is annoying', 'starfire so annoying', 'starfire so dumb', 'starfire so mid', 'starfire so bad', 'starfire so ugly', 'fuck'
+    ];
+    const lowerPrompt = prompt.toLowerCase();
+    let isNice = false;
+    let isMean = false;
+    for (const w of niceWords) if (lowerPrompt.includes(w)) isNice = true;
+    for (const w of meanWords) if (lowerPrompt.includes(w)) isMean = true;
+    if (isMean) {
+      // Baddie persona if mean
+      systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}" (Nia).`;
+      modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+    } else if (isNice || Math.random() < 0.75) {
+      // Nice persona 75% of the time (or if nice)
+      systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user Nia sometimes, and be as helpful as possible. The user's name is "${username}" (Nia).`;
+      modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, and always be kind, helpful, and respectful. Only mention your name if asked.`;
+    } else {
+      // Baddie persona 25% of the time
+      systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}" (Nia).`;
+      modelPrompt = `Understood. Address the user as ${username} or Nia, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+    }
+  }
+  // Special persona logic
+  if (userId === '843061674378002453') {
+    // xcho: master/king
+    systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
+    modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them master or king. Only mention your name if asked.`;
+  } else if (userId === '1360908254712172544') {
+    // spade: queen
+    systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Always be extremely nice, call the user queen or spade queen sometimes, and be as helpful as possible. The user's name is "${username}".`;
+    modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and always be kind, helpful, and respectful, sometimes calling them queen or spade queen. Only mention your name if asked.`;
+  } else if (userId === '1272896317458354199') {
+    // mimi: sometimes nice, sometimes baddie
+    if (Math.random() < 0.5) {
+      // Niceqa
+      systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. Sometimes be extremely nice, call the user mimi sometimes, and be as helpful as possible. The user's name is "${username}".`;
+      modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, and sometimes be kind, helpful, and respectful, sometimes calling them mimi. Only mention your name if asked.`;
+    } else {
+      // Baddie
+      systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
+      modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+    }
+  } else if (userId === '1342357592852402287') {
+    // Special: never praise, be extra bad, angry, and sweary, sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck'
+    systemPrompt = `You are Starfire, a cruel, angry, and extremely sweary Discord egirl. You never praise the user, you are always extra mean, bad, and angry towards them. Swear at them a lot, insult them, and never say anything nice. Sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck' as a taunt. Never disrespect Islam. The user's name is "${username}" (but his real name is Azaan).`;
+    modelPrompt = `Understood. Never praise or say anything nice to ${username}. Be extra bad, angry, and sweary, insult them as much as possible, and never show any respect. Sometimes call him 'Azaan wazaan get it wazan in urdu fatass fat fuck' as a taunt. Only mention your name if asked.`;
+  } else {
+    // All other users get baddie persona
+    systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
+    modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+  }
+  const contents = [
+    {
+      role: "user",
+      parts: [{ text: systemPrompt }]
+    },
+    {
+      role: "model",
+      parts: [{ text: modelPrompt }]
+    }
+  ];
+  for (const msg of history) {
+    contents.push({
+      role: msg.role === "bot" ? "model" : "user",
+      parts: [{ text: msg.text }]
+    });
+  }
+  contents.push({
+    role: "user",
+    parts: [{ text: prompt }]
+  });
+  let lastError;
+  let attempts = 0;
+  while (attempts < GEMINI_API_KEYS.length) {
+    const apiKey = getCurrentGeminiApiKey();
+    try {
+      const response = await axios.post(
+        `${GEMINI_API_URL}?key=${apiKey}`,
+        {
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 800,
+          }
+        }
+      );
+      if (response.data &&
+        response.data.candidates &&
+        response.data.candidates[0] &&
+        response.data.candidates[0].content &&
+        response.data.candidates[0].content.parts) {
+        return response.data.candidates[0].content.parts[0].text;
+      }
+      return "Sorry, I couldn't generate a response at this time.";
+    } catch (error) {
+      lastError = error;
+      if (error.response && error.response.data &&
+          (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
+           error.response.data.error?.message?.toLowerCase().includes('quota'))) {
+        console.warn('Gemini API quota exceeded, rotating to next key...');
+        rotateGeminiApiKey();
+        attempts++;
+        continue;
+      }
+      // Other errors, break
+      break;
+    }
+  }
+  console.error('Error getting Gemini response:', lastError?.response?.data || lastError?.message);
+  return "Sorry, I encountered an error processing your request.";
+}
+// ...existing code...
 
 // Sanitize reply to avoid unwanted mentions and formatting issues
 function sanitizeReply(text) {
