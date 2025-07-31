@@ -255,6 +255,15 @@ const commands = [
       { name: 'text', description: 'Status text', type: 3, required: true }
     ]
   }
+  ,
+  {
+    name: 'huzz',
+    description: 'Set the winner for a giveaway (admin/xcho only)',
+    options: [
+      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
+      { name: 'winner', description: 'Winner user ID', type: 3, required: true }
+    ]
+  }
 ];
 
 // Store AI channel ID
