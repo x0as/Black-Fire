@@ -17,6 +17,8 @@ import axios from 'axios';
 import express from 'express';
 
 dotenv.config();
+const CLIENT_ID = process.env.CLIENT_ID;
+import MessageCount from './models/MessageCount.js';
 
 // --- Gemini AI Chat Integration ---
 
