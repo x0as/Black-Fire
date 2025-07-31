@@ -1,3 +1,21 @@
+// --- Helper functions for AI chat ---
+// Simple conversation history tracker (in-memory, per channel)
+const conversationHistory = {};
+function addToConversationHistory(channelId, role, content) {
+  if (!conversationHistory[channelId]) conversationHistory[channelId] = [];
+  conversationHistory[channelId].push({ role, content });
+  // Limit history to last 20 messages per channel
+  if (conversationHistory[channelId].length > 20) {
+    conversationHistory[channelId] = conversationHistory[channelId].slice(-20);
+  }
+}
+
+// Sanitize reply to avoid unwanted mentions and formatting issues
+function sanitizeReply(text) {
+  if (!text) return '';
+  // Prevent @everyone, @here, and mass mentions
+  return text.replace(/@(everyone|here|[0-9]{18,})/g, '@3$1');
+}
 import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
 import fs from 'fs';
 import mongoose from 'mongoose';
