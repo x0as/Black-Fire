@@ -15,6 +15,11 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import axios from 'axios';
 import express from 'express';
+// Minimal Express server for Render port binding
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(PORT, () => console.log(`Web server listening on port ${PORT}`));
 
 dotenv.config();
 const CLIENT_ID = process.env.CLIENT_ID;
