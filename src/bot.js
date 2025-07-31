@@ -1113,7 +1113,9 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   // Only reply in the selected AI channel, or if the bot is tagged in any channel
-  const botWasMentioned = message.mentions.has(client.user);
+  // Fix mention detection to handle <@id> and <@!id> formats
+  const botMentionRegex = new RegExp(`<@!?${client.user.id}>`);
+  const botWasMentioned = botMentionRegex.test(message.content) || message.mentions.has(client.user);
   if (botWasMentioned || (memory.aiChannelId && message.channel.id === memory.aiChannelId)) {
     // Block persona override prompts
     const personaOverridePatterns = [
@@ -1137,18 +1139,35 @@ client.on(Events.MessageCreate, async (message) => {
       ? Array.from(message.attachments.values()).filter(att => att.contentType && att.contentType.startsWith('image/'))
       : [];
 
-    // Handle direct questions about name, owner, API, or name origin
+    // Define question regexes for direct replies
+    const ownerQuestions = [
+      /who\s*is\s*your\s*owner/i,
+      /who\s*made\s*you/i,
+      /who\s*created\s*you/i,
+      /who\s*is\s*xcho_/i
+    ];
+    const apiQuestions = [
+      /what\s*api\s*do\s*you\s*use/i,
+      /which\s*api\s*is\s*this/i,
+      /who\s*made\s*your\s*api/i
+    ];
+    const nameQuestions = [
+      /what\s*is\s*your\s*name/i,
+      /who\s*are\s*you/i,
+      /your\s*name/i
+    ];
+    // Handle direct questions about name, owner, or API
     if (ownerQuestions.some(rx => rx.test(message.content))) {
       await message.reply(sanitizeReply("My owner is xcho_."));
+      return;
     }
     if (apiQuestions.some(rx => rx.test(message.content))) {
       await message.reply(sanitizeReply("I use a private API by xcho_."));
+      return;
     }
     if (nameQuestions.some(rx => rx.test(message.content))) {
       await message.reply(sanitizeReply("My name is Starfire!"));
-    }
-    if (nameOriginQuestions.some(rx => rx.test(message.content))) {
-      await message.reply(sanitizeReply("My name comes from my owner's name, Huzaifa. It's a shortened version chosen as a tribute."));
+      return;
     }
 
     message.channel.sendTyping();
@@ -1168,7 +1187,8 @@ client.on(Events.MessageCreate, async (message) => {
           await message.reply(sanitizeReply(aiResponse));
         }
       } else {
-        await message.reply(sanitizeReply("Sorry, I couldn't generate a response right now."));
+        // If AI response is empty or 'starfire is thinking', reply with a fallback
+        await message.reply(sanitizeReply("Sorry, Starfire is not available to reply right now. Try again later."));
       }
     } catch (error) {
       console.error('Error in AI chat response:', error);
