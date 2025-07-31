@@ -115,204 +115,6 @@ async function getTextResponse(prompt, channelId, username, userId) {
 }
   
 // --- Slash commands for persona setting ---
-commands.push(
-  {
-    name: 'nice',
-    description: 'Set Starfire to be super nice to a user',
-    options: [
-      { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
-    ]
-  },
-  {
-    name: 'flirt',
-    description: 'Set Starfire to flirt heavily with a user',
-    options: [
-      { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
-    ]
-  },
-  {
-    name: 'baddie',
-    description: 'Set Starfire to be a baddie to a user',
-    options: [
-      { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
-    ]
-  }
-);
-
-// Sanitize reply to avoid unwanted mentions and formatting issues
-function sanitizeReply(text) {
-  if (!text) return '';
-  // Prevent @everyone, @here, and mass mentions
-  return text.replace(/@(everyone|here|[0-9]{18,})/g, '@[ping removed]');
-}
-dotenv.config();
-
-// Express web service for uptime monitoring
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => {
-  res.send('Discord bot is running!');
-});
-app.listen(PORT, () => {
-  console.log(`Web service listening on port ${PORT}`);
-});
-
-const TOKEN = process.env.BOT_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
-});
-
-// Enhanced error logging for Discord login
-async function loginBot() {
-  try {
-    if (!TOKEN) {
-      console.error('[ERROR] BOT_TOKEN is missing from environment variables.');
-      process.exit(1);
-    }
-    await client.login(TOKEN);
-    console.log('[INFO] Discord client login successful.');
-  } catch (err) {
-    console.error('[ERROR] Discord client login failed:', err);
-    if (err.code === 'TOKEN_INVALID' || (err.message && err.message.includes('Invalid token'))) {
-      console.error('[ERROR] The provided BOT_TOKEN is invalid.');
-    }
-    process.exit(1);
-  }
-}
-loginBot();
-let memory = {
-  aiChannelId: null,
-  giveaways: {},
-  model: 'gemini-pro',
-};
-
-
-// MongoDB connection and schema
-const MONGO_URI = process.env.MONGO_URI;
-mongoose.connection.on('error', err => {
-  console.error('[ERROR] MongoDB connection error:', err);
-});
-mongoose.connection.on('disconnected', () => {
-  console.error('[ERROR] MongoDB disconnected.');
-});
-mongoose.connection.on('connected', () => {
-  console.log('[INFO] MongoDB connected successfully.');
-});
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .catch(err => {
-    console.error('[ERROR] Initial MongoDB connection failed:', err);
-    process.exit(1);
-  });
-// Global error handlers for uncaught exceptions and rejections
-process.on('uncaughtException', (err) => {
-  console.error('[FATAL] Uncaught Exception:', err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-client.on('error', (err) => {
-  console.error('[ERROR] Discord client error:', err);
-});
-client.on('shardError', (err, shardId) => {
-  console.error(`[ERROR] Discord shard error on shard ${shardId}:`, err);
-});
-client.on('warn', (info) => {
-  console.warn('[WARN] Discord client warning:', info);
-});
-const giveawaySchema = new mongoose.Schema({
-  _id: String, // message id
-  host: String,
-  prize: String,
-  endTime: Number,
-  entrants: [String],
-  winner: String,
-  color: String
-});
-const Giveaway = mongoose.model('Giveaway', giveawaySchema);
-
-// MessageCount schema for leaderboards
-const messageCountSchema = new mongoose.Schema({
-  userId: String,
-  count: Number,
-  date: { type: String, default: null }
-});
-const MessageCount = mongoose.model('MessageCount', messageCountSchema);
-
-// Helper to get all giveaways as a map (for compatibility)
-async function getGiveawaysMap() {
-  const docs = await Giveaway.find({});
-  const map = {};
-  for (const doc of docs) {
-    map[doc._id] = {
-      host: doc.host,
-      prize: doc.prize,
-      endTime: doc.endTime,
-      entrants: new Set(doc.entrants),
-      winner: doc.winner,
-      color: doc.color,
-    };
-  }
-  return map;
-}
-
-// Helper to get a single giveaway
-async function getGiveaway(id) {
-  const doc = await Giveaway.findById(id);
-  if (!doc) return null;
-  return {
-    host: doc.host,
-    prize: doc.prize,
-    endTime: doc.endTime,
-    entrants: new Set(doc.entrants),
-    winner: doc.winner,
-    color: doc.color,
-  };
-}
-
-// Helper to save/update a giveaway
-async function saveGiveaway(id, data) {
-  await Giveaway.findByIdAndUpdate(
-    id,
-    {
-      host: data.host,
-      prize: data.prize,
-      endTime: data.endTime,
-      entrants: Array.from(data.entrants),
-      winner: data.winner,
-      color: data.color
-    },
-    { upsert: true }
-  );
-}
-
-// Helper to delete a giveaway
-async function deleteGiveaway(id) {
-  await Giveaway.findByIdAndDelete(id);
-}
-
-// Use a proxy for giveaways to always fetch from DB
-const giveaways = new Proxy({}, {
-  get(target, prop) {
-    return (async () => (await getGiveaway(prop)))();
-  },
-  set(target, prop, value) {
-    saveGiveaway(prop, value);
-    return true;
-  },
-  deleteProperty(target, prop) {
-    deleteGiveaway(prop);
-    return true;
-  }
-});
-
-// Register slash commands
 const commands = [
   {
     name: 'spadecult',
@@ -339,39 +141,31 @@ const commands = [
     ],
   },
   {
-    name: 'editgiveaway',
-    description: 'Edit an active giveaway',
+    name: 'nice',
+    description: 'Set Starfire to be super nice to a user',
     options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-      { name: 'prize', description: 'New prize', type: 3, required: false },
-      { name: 'duration', description: 'New duration in minutes', type: 4, required: false },
-      { name: 'color', description: 'New embed color (hex)', type: 3, required: false },
-      { name: 'host', description: 'New host user (mention or ID)', type: 3, required: false },
-    ],
+      { name: 'user_id', description: 'User ID', type: 3, required: true },
+      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
+    ]
   },
   {
-    name: 'deletegiveaway',
-    description: 'Delete an active giveaway',
+    name: 'flirt',
+    description: 'Set Starfire to flirt heavily with a user',
     options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-    ],
+      { name: 'user_id', description: 'User ID', type: 3, required: true },
+      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
+    ]
   },
   {
-    name: 'endgiveaway',
-    description: 'End an active giveaway immediately',
+    name: 'baddie',
+    description: 'Set Starfire to be a baddie to a user',
     options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-    ],
+      { name: 'user_id', description: 'User ID', type: 3, required: true },
+      { name: 'nickname', description: 'Nickname to call the user', type: 3, required: true }
+    ]
   },
   {
-    name: 'huzz',
-    description: 'huzhuzhuz',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-      { name: 'winner', description: 'Winner user ID', type: 3, required: true },
-    ],
-  },
-  { name: '8ball', description: 'Ask the magic 8-ball a question', options: [{ name: 'question', description: 'Your question', type: 3, required: true }] },
+    name: '8ball', description: 'Ask the magic 8-ball a question', options: [{ name: 'question', description: 'Your question', type: 3, required: true }] },
   { name: 'coinflip', description: 'Flips a coin' },
   { name: 'dailyboard', description: "Shows today's message leaderboard." },
   { name: 'leaderboard', description: 'Shows the all-time message leaderboard.' },
