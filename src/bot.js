@@ -186,8 +186,8 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
 }
 
 async function getTextResponse(prompt, channelId, username, userId) {
-  let systemPrompt = undefined;
-  let modelPrompt = undefined;
+  let systemPrompt = "You are Starfire, a Discord egirl. Reply in a fun, engaging way.";
+  let modelPrompt = "Understood. Reply as Starfire.";
   let history = getConversationContext(channelId);
   // Persona override from commands
   if (userPersonas.has(userId)) {
@@ -250,33 +250,25 @@ async function getTextResponse(prompt, channelId, username, userId) {
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
   }
-  // Ensure systemPrompt and modelPrompt are always defined before payload
-  if (!systemPrompt) {
+  // Always assign fallback before any usage
+  if (typeof systemPrompt === 'undefined' || systemPrompt === null) {
     systemPrompt = "You are Starfire, a Discord egirl. Reply in a fun, engaging way.";
   }
-  if (!modelPrompt) {
+  if (typeof modelPrompt === 'undefined' || modelPrompt === null) {
     modelPrompt = "Understood. Reply as Starfire.";
   }
-  const contents = [
-    {
-      role: "user",
-      parts: [{ text: systemPrompt }]
-    },
-    {
-      role: "model",
-      parts: [{ text: modelPrompt }]
-    }
-  ];
+
+  // Build Gemini API payload using guaranteed variables
+  let contents = [];
+  contents.push({ role: "system", parts: [{ text: systemPrompt }] });
+  contents.push({ role: "system", parts: [{ text: modelPrompt }] });
   for (const msg of history) {
     contents.push({
       role: msg.role === "bot" ? "model" : "user",
       parts: [{ text: msg.text }]
     });
   }
-  contents.push({
-    role: "user",
-    parts: [{ text: prompt }]
-  });
+  contents.push({ role: "user", parts: [{ text: prompt }] });
   let lastError;
   let attempts = 0;
   while (attempts < GEMINI_API_KEYS.length) {
@@ -1146,31 +1138,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 
   // --- Gemini API robust logging ---
-  const apiKey = getCurrentGeminiApiKey();
-  const payload = {
-    contents: [
-      { role: "system", parts: [{ text: systemPrompt }] },
-      ...history.map(h => ({ role: h.role, parts: [{ text: h.text }] })),
-      { role: "user", parts: [{ text: prompt }] },
-      { role: "system", parts: [{ text: modelPrompt }] }
-    ]
-  };
-  let aiResponse = "";
-  console.log('[Gemini API Request]', JSON.stringify(payload, null, 2));
-  try {
-    const res = await axios.post(
-      `${GEMINI_API_URL}?key=${apiKey}`,
-      payload,
-      { headers: { "Content-Type": "application/json" } }
-    );
-    console.log('[Gemini API Response]', res.data);
-    if (res.data && res.data.candidates && res.data.candidates.length > 0 && res.data.candidates[0].content && res.data.candidates[0].content.parts && res.data.candidates[0].content.parts.length > 0) {
-      aiResponse = res.data.candidates[0].content.parts[0].text;
-    }
-  } catch (err) {
-    console.error('[Gemini API Error]', err.response ? err.response.data : err);
-  }
-  console.log('[Gemini Final Response]', aiResponse);
+  // ...existing code...
 
   // Login the Discord client
   client.login(process.env.TOKEN);
