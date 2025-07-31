@@ -1,4 +1,13 @@
 // --- Gemini AI Chat Integration ---
+// --- Utility: sanitizeReply ---
+function sanitizeReply(content) {
+  if (!content) return '';
+  return content
+    .replace(/@everyone/g, 'everyone')
+    .replace(/@here/g, 'here')
+    .replace(/<@&?\d+>/g, '[ping removed]')
+    .slice(0, 2000);
+}
 
 import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
 // Initialize Discord client
