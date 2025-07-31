@@ -253,6 +253,38 @@ const commands = [
 
 // Store AI channel ID
 // Store bot memory (e.g., AI channel ID)
+// --- Utility: sanitizeReply ---
+function sanitizeReply(text) {
+  if (!text) return '';
+  // Remove Discord @everyone/@here mentions and limit length
+  return text.replace(/@(everyone|here)/g, '@3$1').slice(0, 2000);
+}
+
+// --- Giveaway Storage ---
+const giveaways = {};
+
+// Save giveaway state (in-memory, not persistent)
+async function saveGiveaway(id, data) {
+  giveaways[id] = {
+    ...data,
+    entrants: data.entrants || new Set(),
+    winner: data.winner || null,
+    color: data.color || null,
+    prize: data.prize || '',
+    host: data.host || '',
+    endTime: data.endTime || Date.now() + 60000
+  };
+}
+
+// Get giveaway by ID
+async function getGiveaway(id) {
+  return giveaways[id];
+}
+
+// Delete giveaway by ID
+async function deleteGiveaway(id) {
+  delete giveaways[id];
+}
 const memory = {
   aiChannelId: null
 };
