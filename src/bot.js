@@ -60,8 +60,8 @@ function addToConversationHistory(channelId, role, text) {
 const userPersonas = new Map(); // userId -> { type: 'nice'|'flirt'|'baddie', nickname: string }
 
 async function getTextResponse(prompt, channelId, username, userId) {
-  let systemPrompt = "You are Starfire, a Discord egirl.";
-  let modelPrompt = "Understood. Reply as Starfire.";
+  let systemPrompt;
+  let modelPrompt;
   let history = getConversationContext(channelId);
   // Persona override from commands
   console.log(`[Persona Check] userId: ${userId}, hasPersona: ${userPersonas.has(userId)}`);
@@ -134,6 +134,13 @@ async function getTextResponse(prompt, channelId, username, userId) {
     // All other users get baddie persona
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
     modelPrompt = `Understood. Address the user as ${username}, say your owner is xcho_ if asked, mention the API only if asked. Keep replies short, blunt, and baddie-like, with lots of swearing. Only mention your name if asked.`;
+  }
+  // Fallback if persona/userId logic did not set prompts
+  if (!systemPrompt) {
+    systemPrompt = "You are Starfire, a Discord egirl. Reply in a fun, engaging way.";
+  }
+  if (!modelPrompt) {
+    modelPrompt = "Understood. Reply as Starfire.";
   }
 }
   
