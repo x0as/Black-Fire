@@ -60,7 +60,6 @@ function addToConversationHistory(channelId, role, text) {
 const userPersonas = new Map(); // userId -> { type: 'nice'|'flirt'|'baddie', nickname: string }
 
 async function getTextResponse(prompt, channelId, username, userId) {
-import axios from 'axios';
 
 // Support multiple Gemini API keys for quota failover
 const GEMINI_API_KEYS = (process.env.GEMINI_API_KEYS ? process.env.GEMINI_API_KEYS.split(',') : [process.env.GEMINI_API || 'AIzaSyAC7LqN69mW81QzB8iDiOWgHtTIf1Lyhi8']).map(k => k.trim()).filter(Boolean);
