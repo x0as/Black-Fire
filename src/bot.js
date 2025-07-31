@@ -18,7 +18,7 @@ import express from 'express';
 
 dotenv.config();
 const CLIENT_ID = process.env.CLIENT_ID;
-import MessageCount from './models/MessageCount.js';
+// ...existing code...
 
 // --- Gemini AI Chat Integration ---
 
@@ -792,31 +792,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Dailyboard
   if (interaction.commandName === 'dailyboard') {
-    const today = new Date().toISOString().slice(0, 10);
-    const topDaily = await MessageCount.find({ date: today }).sort({ count: -1 }).limit(10);
-    const board = topDaily.length
-      ? topDaily.map((entry, i) => `${i + 1}. <@${entry.userId}>: ${entry.count}`).join('\n')
-      : 'No messages today.';
-    const embed = new EmbedBuilder()
-      .setTitle('📅 Today\'s Leaderboard')
-      .setDescription(board)
-      .setColor(0x2ecc71);
-    await interaction.reply({ embeds: [embed] });
-    return;
+    // ...removed dailyboard command...
   }
 
   // Leaderboard
   if (interaction.commandName === 'leaderboard') {
-    const topAllTime = await MessageCount.find({ date: null }).sort({ count: -1 }).limit(10);
-    const board = topAllTime.length
-      ? topAllTime.map((entry, i) => `${i + 1}. <@${entry.userId}>: ${entry.count}`).join('\n')
-      : 'No messages yet.';
-    const embed = new EmbedBuilder()
-      .setTitle('🏆 All-Time Leaderboard')
-      .setDescription(board)
-      .setColor(0xe67e22);
-    await interaction.reply({ embeds: [embed] });
-    return;
+    // ...removed leaderboard command...
   }
 
   // Meme
@@ -1057,22 +1038,7 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.guild || !message.channel) return;
   if (!message.channel.id || !message.guild.id) return;
 
-  // Track message counts in MongoDB for leaderboards
-  if (!message.author.bot) {
-    // All-time count
-    await MessageCount.updateOne(
-      { userId: message.author.id, date: null },
-      { $inc: { count: 1 } },
-      { upsert: true }
-    );
-    // Daily count
-    const today = new Date().toISOString().slice(0, 10);
-    await MessageCount.updateOne(
-      { userId: message.author.id, date: today },
-      { $inc: { count: 1 } },
-      { upsert: true }
-    );
-  }
+  // ...removed message count tracking...
 
   // Only reply in the selected AI channel, or if the bot is tagged in any channel
   // Fix mention detection to handle <@id> and <@!id> formats
