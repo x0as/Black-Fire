@@ -290,17 +290,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
     if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      }
       return;
     }
     const userId = interaction.options.getString('user_id');
     const nickname = interaction.options.getString('nickname');
     if (!userId || !nickname) {
-      await interaction.reply({ content: 'User ID and nickname are required.', ephemeral: true });
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'User ID and nickname are required.', ephemeral: true });
+      }
       return;
     }
     memory.userBehaviors[userId] = { mode: interaction.commandName, nickname };
-    await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}).`, ephemeral: true });
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}).`, ephemeral: true });
+    }
     return;
   }
   // /spadecult: Assign Spade Cult role to user
