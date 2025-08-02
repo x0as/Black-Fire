@@ -23,12 +23,39 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 client.login(TOKEN);
+
 let memory = {
   aiChannelId: null,
   giveaways: {},
   model: 'gemini-pro',
   userBehaviors: {} // { [userId]: { mode: 'nice'|'flirty'|'baddie', nickname: string } }
 };
+
+// --- Persona MongoDB Schema ---
+const personaSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  mode: { type: String, enum: ['nice', 'flirty', 'baddie'], required: true },
+  nickname: { type: String, required: true }
+});
+const Persona = mongoose.model('Persona', personaSchema);
+
+// Load all personas into memory.userBehaviors on startup
+async function loadPersonasToMemory() {
+  const personas = await Persona.find({});
+  for (const p of personas) {
+    memory.userBehaviors[p.userId] = { mode: p.mode, nickname: p.nickname };
+  }
+}
+loadPersonasToMemory();
+
+// Save or update a persona in MongoDB
+async function savePersona(userId, mode, nickname) {
+  await Persona.findOneAndUpdate(
+    { userId },
+    { mode, nickname },
+    { upsert: true }
+  );
+}
 
 
 // MongoDB connection and schema
@@ -304,6 +331,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     memory.userBehaviors[userId] = { mode: interaction.commandName, nickname };
+    // Save persona to MongoDB
+    await savePersona(userId, interaction.commandName, nickname);
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}).`, ephemeral: true });
     }
