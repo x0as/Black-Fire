@@ -1,3 +1,8 @@
+// Remove a user from Starfire perms in DB and memory
+async function removeStarfirePerm(userId) {
+  await Perms.deleteOne({ userId });
+  starfirePerms.delete(userId);
+}
 import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
 import fs from 'fs';
 import mongoose from 'mongoose';
@@ -32,6 +37,27 @@ let memory = {
 };
 
 // --- Persona MongoDB Schema ---
+// --- Starfire Perms MongoDB Schema ---
+const permsSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true }
+});
+const Perms = mongoose.model('Perms', permsSchema);
+
+// In-memory set of user IDs with Starfire perms
+let starfirePerms = new Set();
+
+// Load all Starfire perms from DB
+async function loadStarfirePerms() {
+  const docs = await Perms.find({});
+  starfirePerms = new Set(docs.map(d => d.userId));
+}
+loadStarfirePerms();
+
+// Add a user to Starfire perms in DB and memory
+async function addStarfirePerm(userId) {
+  await Perms.findOneAndUpdate({ userId }, { userId }, { upsert: true });
+  starfirePerms.add(userId);
+}
 const personaSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   mode: { type: String, enum: ['nice', 'flirty', 'baddie'], required: true },
@@ -141,6 +167,20 @@ const giveaways = new Proxy({}, {
 
 // Register slash commands
 const commands = [
+  {
+    name: 'permsremove',
+    description: 'Remove a user\'s permission to use all Starfire commands',
+    options: [
+      { name: 'user_id', description: 'User ID to remove perms', type: 3, required: true }
+    ]
+  },
+  {
+    name: 'perms',
+    description: 'Grant a user permission to use all Starfire commands',
+    options: [
+      { name: 'user_id', description: 'User ID to grant perms', type: 3, required: true }
+    ]
+  },
   {
     name: 'spadecult',
     description: 'Join the Spade Cult and get the Spade Cult role!'
@@ -311,12 +351,47 @@ client.once('ready', () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // /permsremove: Remove Starfire perms from a user
+  if (interaction.commandName === 'permsremove') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    if (!isAdmin) {
+      await interaction.reply({ content: 'You must be an administrator to use this command.', ephemeral: true });
+      return;
+    }
+    const userId = interaction.options.getString('user_id');
+    if (!userId) {
+      await interaction.reply({ content: 'User ID is required.', ephemeral: true });
+      return;
+    }
+    await removeStarfirePerm(userId);
+    await interaction.reply({ content: `<@${userId}> has been removed from Starfire command permissions.`, ephemeral: true });
+    return;
+  }
+  // /perms: Grant Starfire perms to a user
+  if (interaction.commandName === 'perms') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    if (!isAdmin) {
+      await interaction.reply({ content: 'You must be an administrator to use this command.', ephemeral: true });
+      return;
+    }
+    const userId = interaction.options.getString('user_id');
+    if (!userId) {
+      await interaction.reply({ content: 'User ID is required.', ephemeral: true });
+      return;
+    }
+    await addStarfirePerm(userId);
+    await interaction.reply({ content: `<@${userId}> has been granted permission to use all Starfire commands.`, ephemeral: true });
+    return;
+  }
   // /nice, /flirty, /baddie: Set Starfire's behavior for a user
   if (["nice", "flirty", "baddie"].includes(interaction.commandName)) {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
@@ -364,7 +439,8 @@ if (interaction.commandName === 'editgiveaway' || interaction.commandName === 'e
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
       await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       return;
     }
@@ -403,7 +479,8 @@ if (interaction.commandName === 'deletegiveaway' || interaction.commandName === 
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
       await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       return;
     }
@@ -428,7 +505,8 @@ if (interaction.commandName === 'endgiveaway' || interaction.commandName === 'en
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
       await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
       return;
     }
@@ -487,7 +565,8 @@ if (interaction.commandName === 'endgiveaway' || interaction.commandName === 'en
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
       await interaction.reply({ content: 'You do not have permission to set the AI channel.', ephemeral: true });
       return;
     }
@@ -504,7 +583,8 @@ if (interaction.commandName === 'endgiveaway' || interaction.commandName === 'en
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
       await interaction.reply({ content: 'You do not have permission to remove the AI channel.', ephemeral: true });
       return;
     }
