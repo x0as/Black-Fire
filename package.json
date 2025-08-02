@@ -1,0 +1,18 @@
+{
+  "name": "project-blackfire",
+  "version": "1.0.0",
+  "description": "Discord bot for giveaways, AI chat, and moderation.",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "discord.js": "^14.0.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "mongoose": "^7.8.7",
+    "node-fetch": "^3.3.2"
+  },
+  "type": "module"
+}
