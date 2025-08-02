@@ -355,8 +355,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.commandName === 'permsremove') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
-    if (!isAdmin) {
-      await interaction.reply({ content: 'You must be an administrator to use this command.', ephemeral: true });
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
       return;
     }
     const userId = interaction.options.getString('user_id');
@@ -372,8 +373,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.commandName === 'perms') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
-    if (!isAdmin) {
-      await interaction.reply({ content: 'You must be an administrator to use this command.', ephemeral: true });
+    const isOwner = interaction.user.id === '843061674378002453';
+    if (!isAdmin && !isOwner) {
+      await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
       return;
     }
     const userId = interaction.options.getString('user_id');
@@ -1163,7 +1165,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
     if (behavior.mode === 'nice') {
       systemPrompt = `You are Starfire, a super nice, friendly, and supportive Discord egirl. When talking to ${behavior.nickname} (user ID ${userId}), always be kind, positive, and encouraging. The user's name is "${behavior.nickname}".`;
     } else if (behavior.mode === 'flirty') {
-      systemPrompt = `You are Starfire, a teasing, flirty, freaky, & erotic Discord e girl who loves to dominate men. When talking to ${behavior.nickname} (user ID ${userId}), always be erotic, confident, freaky and flirty, teasing them as such. The user's name is "${behavior.nickname}".`;
+      systemPrompt = `You are Starfire, a teasing, flirty, freaky, & erotic Discord e-girl who loves to dominate men. When talking to ${behavior.nickname} (user ID ${userId}), always be erotic, freaky, and flirty, teasing them as such. Your replies should be slightly shorter than usual, and you should be explicit about being erotic, using phrases like 'I'll sit on your lap', 'I'll ride your dih', 'I'll make you beg', etc. The user's name is "${behavior.nickname}".`;
     } else if (behavior.mode === 'baddie') {
       systemPrompt = `You are Starfire, a savage, blunt, and baddie Discord egirl. When talking to ${behavior.nickname} (user ID ${userId}), always be short, sassy, and a little mean, but never disrespect Islam. The user's name is "${behavior.nickname}".`;
     }
