@@ -61,7 +61,8 @@ async function addStarfirePerm(userId) {
 const personaSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   mode: { type: String, enum: ['nice', 'flirty', 'baddie'], required: true },
-  nickname: { type: String, required: true }
+  nickname: { type: String, required: true },
+  gender: { type: String, required: false }
 });
 const Persona = mongoose.model('Persona', personaSchema);
 
@@ -69,16 +70,16 @@ const Persona = mongoose.model('Persona', personaSchema);
 async function loadPersonasToMemory() {
   const personas = await Persona.find({});
   for (const p of personas) {
-    memory.userBehaviors[p.userId] = { mode: p.mode, nickname: p.nickname };
+    memory.userBehaviors[p.userId] = { mode: p.mode, nickname: p.nickname, gender: p.gender };
   }
 }
 loadPersonasToMemory();
 
 // Save or update a persona in MongoDB
-async function savePersona(userId, mode, nickname) {
+async function savePersona(userId, mode, nickname, gender) {
   await Persona.findOneAndUpdate(
     { userId },
-    { mode, nickname },
+    { mode, nickname, gender },
     { upsert: true }
   );
 }
@@ -190,7 +191,8 @@ const commands = [
     description: 'Set Starfire to be nice to a user',
     options: [
       { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname for the user', type: 3, required: true }
+      { name: 'nickname', description: 'Nickname for the user', type: 3, required: true },
+      { name: 'gender', description: 'Gender of the user (e.g. male, female, nonbinary)', type: 3, required: true }
     ]
   },
   {
@@ -198,7 +200,8 @@ const commands = [
     description: 'Set Starfire to be flirty to a user',
     options: [
       { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname for the user', type: 3, required: true }
+      { name: 'nickname', description: 'Nickname for the user', type: 3, required: true },
+      { name: 'gender', description: 'Gender of the user (e.g. male, female, nonbinary)', type: 3, required: true }
     ]
   },
   {
@@ -206,7 +209,8 @@ const commands = [
     description: 'Set Starfire to be a baddie to a user',
     options: [
       { name: 'user_id', description: 'User ID', type: 3, required: true },
-      { name: 'nickname', description: 'Nickname for the user', type: 3, required: true }
+      { name: 'nickname', description: 'Nickname for the user', type: 3, required: true },
+      { name: 'gender', description: 'Gender of the user (e.g. male, female, nonbinary)', type: 3, required: true }
     ]
   },
   {
@@ -351,6 +355,53 @@ client.once('ready', () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // /reroll: Reroll a new winner for a giveaway
+  if (interaction.commandName === 'reroll') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    const isPerm = starfirePerms.has(interaction.user.id);
+    if (!isAdmin && !isOwner && !isPerm) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      return;
+    }
+    const msgId = interaction.options.getString('message_id');
+    let g = await giveaways[msgId];
+    if (!g) {
+      await interaction.reply({ content: 'No active giveaway found for that message ID.', ephemeral: true });
+      return;
+    }
+    if (!g.entrants || !(g.entrants instanceof Set) || g.entrants.size === 0) {
+      await interaction.reply({ content: 'No entrants to reroll.', ephemeral: true });
+      return;
+    }
+    // Remove the current winner from the entrants set (if any)
+    if (g.winner) g.entrants.delete(g.winner);
+    if (g.entrants.size === 0) {
+      await interaction.reply({ content: 'No other entrants to reroll.', ephemeral: true });
+      return;
+    }
+    // Pick a new winner
+    const entrantsArr = Array.from(g.entrants);
+    const newWinnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+    g.winner = newWinnerId;
+    await saveGiveaway(msgId, g);
+    // Update the giveaway message embed
+    try {
+      const msg = await interaction.channel.messages.fetch(msgId);
+      const endEmbed = new EmbedBuilder()
+        .setTitle('🎉 GIVEAWAY ENDED (REROLLED) 🎉')
+        .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: <@${newWinnerId}>\nEntries: ${g.entrants.size}`)
+        .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
+        .setFooter({ text: `Giveaway ID: ${msgId}` });
+      await msg.edit({ embeds: [endEmbed], components: [] });
+      await msg.channel.send({ content: `🎉 Congratulations <@${newWinnerId}>! You won the reroll for **${g.prize}**! 🎉` });
+      await interaction.reply({ content: `Rerolled! New winner: <@${newWinnerId}>`, ephemeral: true });
+    } catch (e) {
+      await interaction.reply({ content: `Reroll succeeded, but failed to update the message: ${e.message || e}`, ephemeral: true });
+    }
+    return;
+  }
   // /permsremove: Remove Starfire perms from a user
   if (interaction.commandName === 'permsremove') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
@@ -401,17 +452,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     const userId = interaction.options.getString('user_id');
     const nickname = interaction.options.getString('nickname');
-    if (!userId || !nickname) {
+    const gender = interaction.options.getString('gender');
+    if (!userId || !nickname || !gender) {
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: 'User ID and nickname are required.', ephemeral: true });
+        await interaction.reply({ content: 'User ID, nickname, and gender are required.', ephemeral: true });
       }
       return;
     }
-    memory.userBehaviors[userId] = { mode: interaction.commandName, nickname };
+    memory.userBehaviors[userId] = { mode: interaction.commandName, nickname, gender };
     // Save persona to MongoDB
-    await savePersona(userId, interaction.commandName, nickname);
+    await savePersona(userId, interaction.commandName, nickname, gender);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}).`, ephemeral: true });
+      await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}, gender: ${gender}).`, ephemeral: true });
     }
     return;
   }
@@ -1088,7 +1140,7 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
       role: "user",
       parts: [
         {
-          text: `You are Zaifa, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Always reply in a fun, warm, and human-like way. Use natural, casual punctuation and spelling like a real person. Keep your replies short and easy to read, like a quick Discord message. You love making new friends, telling jokes, and keeping conversations light-hearted. If someone asks your name, say "My name is Zaifa!" Never mention Google or Gemini in your replies. The user's name is "${username}".`
+          text: `You are Starfire, a super friendly, chatty Discord bot who loves to talk, crack jokes, and make people smile. Always reply in a fun, warm, and human-like way. Use natural, casual punctuation and spelling like a real person. Keep your replies short and easy to read, like a quick Discord message. You love making new friends, telling jokes, and keeping conversations light-hearted. If someone asks your name, say "My name is Starfire!" Never mention Google or Gemini in your replies. The user's name is "${username}".`
         }
       ]
     }
@@ -1161,15 +1213,18 @@ async function getTextResponse(prompt, channelId, username, userId) {
   let behavior = memory.userBehaviors[userId];
   if (userId === '843061674378002453') {
     systemPrompt = `You are Starfire, a super kind, respectful, and helpful Discord egirl. When talking to xcho_ (user ID 843061674378002453), always be extremely nice, call them master or king sometimes, and be as helpful as possible. The user's name is "${username}".`;
-  } else if (behavior) {
+  } else if (behavior && behavior.mode && behavior.nickname && userId === behavior.userId) {
+    // Only apply persona if the message author matches the persona userId
+    const gender = behavior.gender ? behavior.gender : 'unspecified';
     if (behavior.mode === 'nice') {
-      systemPrompt = `You are Starfire, a super nice, friendly, and supportive Discord egirl. When talking to ${behavior.nickname} (user ID ${userId}), always be kind, positive, and encouraging. The user's name is "${behavior.nickname}".`;
+      systemPrompt = `You are Starfire, a super nice, friendly, and supportive Discord egirl. When talking to ${behavior.nickname} (user ID ${userId}), always be kind, positive, and encouraging. The user's name is "${behavior.nickname}". The user's gender is "${gender}".`;
     } else if (behavior.mode === 'flirty') {
-      systemPrompt = `You are Starfire, a teasing, flirty, freaky, & erotic Discord e-girl who loves to dominate men. When talking to ${behavior.nickname} (user ID ${userId}), always be erotic, freaky, and flirty, teasing them as such. Your replies should be slightly shorter than usual, and you should be explicit about being erotic, using phrases like 'I'll sit on your lap', 'I'll ride your dih', 'I'll make you beg', etc. The user's name is "${behavior.nickname}".`;
+      systemPrompt = `You are Starfire, a teasing, flirty, freaky, & erotic Discord e-girl who loves to dominate men. When talking to ${behavior.nickname} (user ID ${userId}), always be erotic, freaky, and flirty, teasing them as such. Your replies should be slightly shorter than usual, and you should be explicit about being erotic, using phrases like 'I'll sit on your lap', 'I'll ride your dih', 'I'll make you beg', etc. The user's name is "${behavior.nickname}". The user's gender is "${gender}".`;
     } else if (behavior.mode === 'baddie') {
-      systemPrompt = `You are Starfire, a savage, blunt, and baddie Discord egirl. When talking to ${behavior.nickname} (user ID ${userId}), always be short, sassy, and a little mean, but never disrespect Islam. The user's name is "${behavior.nickname}".`;
+      systemPrompt = `You are Starfire, a savage, blunt, and baddie Discord egirl. When talking to ${behavior.nickname} (user ID ${userId}), always be short, sassy, and a little mean, but never disrespect Islam. The user's name is "${behavior.nickname}". The user's gender is "${gender}".`;
     }
   } else {
+    // No persona or not the assigned user, use default
     systemPrompt = `You are Starfire, a cruel baddie Discord egirl who swears a lot, is always blunt, and only says a little. Your replies are short, savage, and often mean, but never disrespect Islam. You rarely help unless you feel like it. The user's name is "${username}".`;
   }
   const contents = [
@@ -1179,17 +1234,20 @@ async function getTextResponse(prompt, channelId, username, userId) {
     },
     {
       role: "model",
-      parts: [{
-        text: userId === '843061674378002453'
-          ? `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful to xcho_ (user ID 843061674378002453), sometimes calling them master or king.`
-          : behavior && behavior.mode === 'nice'
-            ? `Understood. I'll refer to myself as Zaifa, address the user as ${behavior.nickname}, and always be nice, friendly, and supportive to them.`
-            : behavior && behavior.mode === 'flirty'
-              ? `Understood. I'll refer to myself as Zaifa, address the user as ${behavior.nickname}, and always be flirty, playful, and charming to them.`
-              : behavior && behavior.mode === 'baddie'
-                ? `Understood. I'll refer to myself as Zaifa, address the user as ${behavior.nickname}, and always be short, sassy, and a little mean to them (but never disrespect Islam).`
-                : `Understood. I'll refer to myself as Zaifa, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
-      }]
+      parts: [
+        {
+          text:
+            userId === '843061674378002453'
+              ? `Understood. I'll refer to myself as Starfire, address the user as ${username}, say my owner is xcho_ if asked, and always be kind, helpful, and respectful to xcho_ (user ID 843061674378002453), sometimes calling them master or king.`
+              : behavior && behavior.mode === 'nice'
+                ? `Understood. I'll refer to myself as Starfire, address the user as ${behavior.nickname}, and always be nice, friendly, and supportive to them.`
+                : behavior && behavior.mode === 'flirty'
+                  ? `Understood. I'll refer to myself as Starfire, address the user as ${behavior.nickname}, and always be flirty, playful, and charming to them.`
+                  : behavior && behavior.mode === 'baddie'
+                    ? `Understood. I'll refer to myself as Starfire, address the user as ${behavior.nickname}, and always be short, sassy, and a little mean to them (but never disrespect Islam).`
+                    : `Understood. I'll refer to myself as Starfire, address the user as ${username}, say my owner is xcho_ if asked, mention the API only if asked, and explain my name is from Huzaifa. I will keep replies short, blunt, and baddie-like, with lots of swearing.`
+        }
+      ]
     }
   ];
   for (const msg of history) {
