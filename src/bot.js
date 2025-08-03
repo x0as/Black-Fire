@@ -566,7 +566,52 @@ if (interaction.commandName === 'endgiveaway' || interaction.commandName === 'en
     }
     const msgId = interaction.options.getString('message_id');
     let g = await giveaways[msgId];
-    if (!g) return await interaction.reply({ content: 'No active giveaway found for that message ID.', flags: 64 });
+    if (!g) {
+      // If not found, try to reroll the winner on the ended giveaway message
+      try {
+        const msg = await interaction.channel.messages.fetch(msgId);
+        // Try to extract winner and entrants from the embed
+        const embed = msg.embeds[0];
+        if (!embed) {
+          return await interaction.reply({ content: 'No active or ended giveaway found for that message ID.', flags: 64 });
+        }
+        // Try to parse entrants and winner from embed description
+        const desc = embed.description || '';
+        const entriesMatch = desc.match(/Entries: (\d+)/);
+        const winnerMatch = desc.match(/Winner: <@(\d+)>/);
+        if (!entriesMatch || parseInt(entriesMatch[1]) === 0) {
+          return await interaction.reply({ content: 'No entrants to reroll.', flags: 64 });
+        }
+        // Try to get entrants from the DB (if possible)
+        // If not, reroll among all users who reacted to the message (fallback)
+        let entrants = [];
+        try {
+          const reaction = msg.reactions.cache.find(r => r.emoji.name === '🎉') || msg.reactions.cache.first();
+          if (reaction) {
+            const users = await reaction.users.fetch();
+            entrants = users.filter(u => !u.bot).map(u => u.id);
+          }
+        } catch {}
+        // Remove the previous winner if present
+        if (winnerMatch) {
+          entrants = entrants.filter(id => id !== winnerMatch[1]);
+        }
+        if (!entrants.length) {
+          return await interaction.reply({ content: 'No other entrants to reroll.', flags: 64 });
+        }
+        const newWinnerId = entrants[Math.floor(Math.random() * entrants.length)];
+        // Edit the embed to show rerolled winner
+        const newEmbed = EmbedBuilder.from(embed)
+          .setTitle('🎉 GIVEAWAY ENDED (REROLLED) 🎉')
+          .setDescription(desc.replace(/Winner: <@\d+>/, `Winner: <@${newWinnerId}>`));
+        await msg.edit({ embeds: [newEmbed], components: [] });
+        await msg.channel.send({ content: `🎉 Congratulations <@${newWinnerId}>! You won the reroll for **${embed.title || 'the giveaway'}**! 🎉` });
+        await interaction.reply({ content: `Rerolled! New winner: <@${newWinnerId}>`, ephemeral: true });
+      } catch (e) {
+        return await interaction.reply({ content: `No active giveaway found and failed to reroll: ${e.message || e}`, flags: 64 });
+      }
+      return;
+    }
     // Ensure entrants is a Set
     if (!g.entrants || !(g.entrants instanceof Set)) g.entrants = new Set(g.entrants || []);
     // Always defer reply to allow followUp
