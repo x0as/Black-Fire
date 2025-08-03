@@ -140,13 +140,14 @@ async function saveGiveaway(id, data) {
       endTime: data.endTime,
       entrants: Array.from(data.entrants),
       winner: data.winner,
-      color: data.color
+      color: data.color,
+      ended: data.ended || false
     },
     { upsert: true }
   );
 }
 
-// Helper to delete a giveaway
+// Helper to delete a giveaway (for admin cleanup only)
 async function deleteGiveaway(id) {
   await Giveaway.findByIdAndDelete(id);
 }
@@ -565,70 +566,51 @@ if (interaction.commandName === 'endgiveaway' || interaction.commandName === 'en
       return;
     }
     const msgId = interaction.options.getString('message_id');
-    let g = await giveaways[msgId];
+    // Always look up the giveaway in MongoDB, even if ended
+    let g = await Giveaway.findById(msgId);
     if (!g) {
-      // If not found, try to reroll the winner on the ended giveaway message
+      return await interaction.reply({ content: 'No giveaway found for that message ID.', flags: 64 });
+    }
+    // If already ended, reroll
+    if (g.ended) {
+      let entrants = Array.isArray(g.entrants) ? g.entrants.filter(id => id !== g.winner) : [];
+      if (!entrants.length) {
+        return await interaction.reply({ content: 'No other entrants to reroll.', flags: 64 });
+      }
+      const newWinnerId = entrants[Math.floor(Math.random() * entrants.length)];
+      g.winner = newWinnerId;
+      await g.save();
       try {
         const msg = await interaction.channel.messages.fetch(msgId);
-        // Try to extract winner and entrants from the embed
         const embed = msg.embeds[0];
-        if (!embed) {
-          return await interaction.reply({ content: 'No active or ended giveaway found for that message ID.', flags: 64 });
-        }
-        // Try to parse entrants and winner from embed description
-        const desc = embed.description || '';
-        const entriesMatch = desc.match(/Entries: (\d+)/);
-        const winnerMatch = desc.match(/Winner: <@(\d+)>/);
-        if (!entriesMatch || parseInt(entriesMatch[1]) === 0) {
-          return await interaction.reply({ content: 'No entrants to reroll.', flags: 64 });
-        }
-        // Try to get entrants from the DB (if possible)
-        // If not, reroll among all users who reacted to the message (fallback)
-        let entrants = [];
-        try {
-          const reaction = msg.reactions.cache.find(r => r.emoji.name === '🎉') || msg.reactions.cache.first();
-          if (reaction) {
-            const users = await reaction.users.fetch();
-            entrants = users.filter(u => !u.bot).map(u => u.id);
-          }
-        } catch {}
-        // Remove the previous winner if present
-        if (winnerMatch) {
-          entrants = entrants.filter(id => id !== winnerMatch[1]);
-        }
-        if (!entrants.length) {
-          return await interaction.reply({ content: 'No other entrants to reroll.', flags: 64 });
-        }
-        const newWinnerId = entrants[Math.floor(Math.random() * entrants.length)];
-        // Edit the embed to show rerolled winner
         const newEmbed = EmbedBuilder.from(embed)
           .setTitle('🎉 GIVEAWAY ENDED (REROLLED) 🎉')
-          .setDescription(desc.replace(/Winner: <@\d+>/, `Winner: <@${newWinnerId}>`));
+          .setDescription((embed.description || '').replace(/Winner: <@\d+>/, `Winner: <@${newWinnerId}>`));
         await msg.edit({ embeds: [newEmbed], components: [] });
-        await msg.channel.send({ content: `🎉 Congratulations <@${newWinnerId}>! You won the reroll for **${embed.title || 'the giveaway'}**! 🎉` });
+        await msg.channel.send({ content: `🎉 Congratulations <@${newWinnerId}>! You won the reroll for **${g.prize}**! 🎉` });
         await interaction.reply({ content: `Rerolled! New winner: <@${newWinnerId}>`, ephemeral: true });
       } catch (e) {
-        return await interaction.reply({ content: `No active giveaway found and failed to reroll: ${e.message || e}`, flags: 64 });
+        return await interaction.reply({ content: `Reroll succeeded, but failed to update the message: ${e.message || e}`, ephemeral: true });
       }
       return;
     }
-    // Ensure entrants is a Set
-    if (!g.entrants || !(g.entrants instanceof Set)) g.entrants = new Set(g.entrants || []);
+    // If not ended, end the giveaway and mark as ended
+    if (!g.entrants || !Array.isArray(g.entrants)) g.entrants = [];
     // Always defer reply to allow followUp
     if (!interaction.deferred && !interaction.replied) {
       await interaction.deferReply();
     }
-    // If a winner was set by /huzz or /huzzspade, use that winner and do not pick a random one
     let winnerId = g.winner || null;
-    if (!winnerId && g.entrants.size > 0) {
-      const entrantsArr = Array.from(g.entrants);
+    if (!winnerId && g.entrants.length > 0) {
+      const entrantsArr = g.entrants;
       winnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
       g.winner = winnerId;
-      await saveGiveaway(msgId, g);
     }
+    g.ended = true;
+    await g.save();
     const endEmbed = new EmbedBuilder()
       .setTitle('🎉 GIVEAWAY ENDED 🎉')
-      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.size}`)
+      .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}\nEntries: ${g.entrants.length}`)
       .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
       .setFooter({ text: `Giveaway ID: ${msgId}` });
     try {
@@ -638,8 +620,6 @@ if (interaction.commandName === 'endgiveaway' || interaction.commandName === 'en
         await msg.channel.send({ content: `🎉 Congratulations <@${winnerId}>! You won the giveaway for **${g.prize}**! 🎉` });
       }
       await interaction.editReply({ content: `Giveaway ended! Winner: ${winnerId ? `<@${winnerId}>` : 'No entrants.'}` });
-      // Delete giveaway from DB to prevent further rerolls
-      await deleteGiveaway(msgId);
     } catch (e) {
       console.error('endgiveaway error:', e);
       await interaction.editReply({ content: `Error ending giveaway: ${e.message || e}` });
