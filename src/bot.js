@@ -170,6 +170,13 @@ const giveaways = new Proxy({}, {
 // Register slash commands
 const commands = [
   {
+    name: 'reroll',
+    description: 'Reroll a new winner for an ended or active giveaway',
+    options: [
+      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true }
+    ]
+  },
+  {
     name: 'permsremove',
     description: 'Remove a user\'s permission to use all Starfire commands',
     options: [
@@ -356,8 +363,8 @@ client.once('ready', () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  // /reroll: Reroll a new winner for a giveaway
-  if (interaction.commandName === 'reroll') {
+// /reroll: Reroll a new winner for a giveaway
+if (interaction.commandName === 'reroll') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -367,35 +374,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
     const msgId = interaction.options.getString('message_id');
-    let g = await giveaways[msgId];
+    // Always look up the giveaway in MongoDB, even if ended
+    let g = await Giveaway.findById(msgId);
     if (!g) {
-      await interaction.reply({ content: 'No active giveaway found for that message ID.', ephemeral: true });
+      await interaction.reply({ content: 'No giveaway found for that message ID.', ephemeral: true });
       return;
     }
-    if (!g.entrants || !(g.entrants instanceof Set) || g.entrants.size === 0) {
-      await interaction.reply({ content: 'No entrants to reroll.', ephemeral: true });
-      return;
-    }
+    // Entrants must be an array
+    let entrants = Array.isArray(g.entrants) ? g.entrants : [];
     // Remove the current winner from the entrants set (if any)
-    if (g.winner) g.entrants.delete(g.winner);
-    if (g.entrants.size === 0) {
+    if (g.winner) entrants = entrants.filter(id => id !== g.winner);
+    if (entrants.length === 0) {
       await interaction.reply({ content: 'No other entrants to reroll.', ephemeral: true });
       return;
     }
     // Pick a new winner
-    const entrantsArr = Array.from(g.entrants);
-    const newWinnerId = entrantsArr[Math.floor(Math.random() * entrantsArr.length)];
+    const newWinnerId = entrants[Math.floor(Math.random() * entrants.length)];
     g.winner = newWinnerId;
-    await saveGiveaway(msgId, g);
+    await g.save();
     // Update the giveaway message embed
     try {
       const msg = await interaction.channel.messages.fetch(msgId);
-      const endEmbed = new EmbedBuilder()
+      const embed = msg.embeds[0];
+      const newEmbed = EmbedBuilder.from(embed)
         .setTitle('🎉 GIVEAWAY ENDED (REROLLED) 🎉')
-        .setDescription(`Prize: ${g.prize}\nHost: ${g.host ? `<@${g.host}>` : 'Unknown'}\nWinner: <@${newWinnerId}>\nEntries: ${g.entrants.size}`)
-        .setColor(g.color ? parseInt(g.color.replace('#', ''), 16) : 0xf1c40f)
-        .setFooter({ text: `Giveaway ID: ${msgId}` });
-      await msg.edit({ embeds: [endEmbed], components: [] });
+        .setDescription((embed.description || '').replace(/Winner: <@\d+>/, `Winner: <@${newWinnerId}>`));
+      await msg.edit({ embeds: [newEmbed], components: [] });
       await msg.channel.send({ content: `🎉 Congratulations <@${newWinnerId}>! You won the reroll for **${g.prize}**! 🎉` });
       await interaction.reply({ content: `Rerolled! New winner: <@${newWinnerId}>`, ephemeral: true });
     } catch (e) {
@@ -780,13 +784,14 @@ if (interaction.commandName === 'huzz' || interaction.commandName === 'huzzspade
     }
     const msgId = interaction.options.getString('message_id');
     const winnerId = interaction.options.getString('winner');
-    let g = await giveaways[msgId];
+    // Always look up the giveaway in MongoDB, even if ended
+    let g = await Giveaway.findById(msgId);
     if (g) {
       g.winner = winnerId;
-      await saveGiveaway(msgId, g);
+      await g.save();
       await interaction.reply({ content: `Winner for giveaway ${msgId} set to <@${winnerId}> (secretly).`, ephemeral: true });
     } else {
-      await interaction.reply({ content: `No active giveaway found for message ID ${msgId}.`, ephemeral: true });
+      await interaction.reply({ content: `No giveaway found for message ID ${msgId}.`, ephemeral: true });
     }
   }
 
