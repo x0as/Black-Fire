@@ -4,15 +4,36 @@
   "description": "Discord bot for giveaways, AI chat, and moderation.",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js"
+    "start": "node src/bot.js",
+    "build": "npm install",
+    "postinstall": "npm rebuild @discordjs/opus",
+    "dev": "node src/bot.js"
   },
   "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.18.0",
+    "@google-cloud/speech": "^7.2.0",
+    "@google-cloud/text-to-speech": "^6.2.0",
     "axios": "^1.6.0",
     "discord.js": "^14.0.0",
     "dotenv": "^16.0.0",
     "express": "^4.18.2",
+    "ffmpeg-static": "^5.2.0",
+    "libsodium-wrappers": "^0.7.13",
     "mongoose": "^7.8.7",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "node-gtts": "^2.0.2",
+    "node-opus": "^0.3.3",
+    "node-record-lpcm16": "^1.0.1",
+    "node-wav": "^0.0.2",
+    "opusscript": "^0.0.8",
+    "prism-media": "^1.3.5",
+    "say": "^0.16.0",
+    "sodium-native": "^4.0.9"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   },
   "type": "module"
 }
