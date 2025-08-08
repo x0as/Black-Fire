@@ -21,9 +21,13 @@ const TOKEN = process.env.BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildMembers],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
+
+// Initialize Voice Manager
+import VoiceManager from './voice/ultraFastVoiceManager.js'; // Use ultra-fast version with pre-generated audio
+const voiceManager = new VoiceManager(client);
 
 let memory = {
   aiChannelId: null,
@@ -410,6 +414,36 @@ const commands = [
     options: [
       { name: 'user', description: 'User to start timer for', type: 6, required: true }
     ]
+  },
+  {
+    name: 'joinvc',
+    description: 'Make Starfire join your voice channel',
+    options: [
+      { name: 'channel', description: 'Voice channel to join (optional)', type: 7, required: false }
+    ]
+  },
+  {
+    name: 'leavevc',
+    description: 'Make Starfire leave the voice channel'
+  },
+  {
+    name: 'speak',
+    description: 'Make Starfire say something in voice chat',
+    options: [
+      { name: 'text', description: 'What should Starfire say?', type: 3, required: true },
+      { name: 'voice', description: 'Voice type (female/male)', type: 3, required: false }
+    ]
+  },
+  {
+    name: 'vcsay',
+    description: 'Quick voice chat - make Starfire say something in her current voice channel',
+    options: [
+      { name: 'text', description: 'What should Starfire say?', type: 3, required: true }
+    ]
+  },
+  {
+    name: 'voicediag',
+    description: 'Check voice connection performance and diagnostics'
   }
 ];
 
@@ -1479,6 +1513,166 @@ if (interaction.commandName === 'huzz' || interaction.commandName === 'huzzspade
     await interaction.reply({ 
       content: `⏱️ Timer started for <@${targetUser.id}>! Duration: ${timerDurationSeconds} seconds${roleBonus}` 
     });
+  }
+
+  // Voice Commands
+  if (interaction.commandName === 'joinvc') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    const isPerm = starfirePerms.has(interaction.user.id);
+    
+    if (!isAdmin && !isOwner && !isPerm) {
+      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+      return;
+    }
+
+    let targetChannel = interaction.options.getChannel('channel');
+    
+    // If no channel specified, try to join user's current voice channel
+    if (!targetChannel) {
+      const voiceState = member.voice;
+      if (!voiceState.channel) {
+        await interaction.reply({ content: 'You need to be in a voice channel or specify one!', ephemeral: true });
+        return;
+      }
+      targetChannel = voiceState.channel;
+    }
+
+    // Check if it's a voice channel
+    if (targetChannel.type !== 2) { // 2 = GUILD_VOICE
+      await interaction.reply({ content: 'Please specify a voice channel!', ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply();
+    
+    const success = await voiceManager.joinChannel(targetChannel, interaction.user.id);
+    
+    if (success) {
+      await interaction.editReply({ content: `✅ Starfire joined **${targetChannel.name}**! You can now speak to me using voice chat. I'll listen and respond with speech!` });
+    } else {
+      await interaction.editReply({ content: '❌ Failed to join voice channel. Make sure I have permissions!' });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'leavevc') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    const isPerm = starfirePerms.has(interaction.user.id);
+    
+    if (!isAdmin && !isOwner && !isPerm) {
+      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+      return;
+    }
+
+    const success = voiceManager.leaveChannel(interaction.guild.id);
+    
+    if (success) {
+      await interaction.reply({ content: '✅ Starfire left the voice channel!' });
+    } else {
+      await interaction.reply({ content: '❌ I\'m not connected to any voice channel!', ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'speak') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    const isPerm = starfirePerms.has(interaction.user.id);
+    
+    if (!isAdmin && !isOwner && !isPerm) {
+      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+      return;
+    }
+
+    if (!voiceManager.isConnected(interaction.guild.id)) {
+      await interaction.reply({ content: '❌ I need to be in a voice channel first! Use `/joinvc`', ephemeral: true });
+      return;
+    }
+
+    const text = interaction.options.getString('text');
+    const voiceType = interaction.options.getString('voice') || 'female';
+    
+    await interaction.deferReply({ ephemeral: true });
+    
+    const voiceSettings = {
+      voiceName: voiceType === 'male' ? 'en-US-Neural2-D' : 'en-US-Neural2-F',
+      speakingRate: 1.1,
+      pitch: voiceType === 'male' ? -2.0 : 2.0
+    };
+    
+    const success = await voiceManager.speak(interaction.guild.id, text, voiceSettings);
+    
+    if (success) {
+      await interaction.editReply({ content: `✅ Speaking: "${text}"` });
+    } else {
+      await interaction.editReply({ content: '❌ Failed to speak! Make sure I\'m connected to voice.' });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'vcsay') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    const isPerm = starfirePerms.has(interaction.user.id);
+    
+    if (!isAdmin && !isOwner && !isPerm) {
+      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+      return;
+    }
+
+    if (!voiceManager.isConnected(interaction.guild.id)) {
+      await interaction.reply({ content: '❌ I need to be in a voice channel first! Use `/joinvc`', ephemeral: true });
+      return;
+    }
+
+    const text = interaction.options.getString('text');
+    
+    // Quick response - no deferring for faster experience
+    await interaction.reply({ content: `🎤 "${text}"`, ephemeral: true });
+    
+    // Use default voice settings for speed and simplicity
+    const success = await voiceManager.speak(interaction.guild.id, text);
+    
+    if (!success) {
+      await interaction.followUp({ content: '❌ Failed to speak! Check voice connection.', ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'voicediag') {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    const isAdmin = member && member.permissions.has('Administrator');
+    const isOwner = interaction.user.id === '843061674378002453';
+    const isPerm = starfirePerms.has(interaction.user.id);
+    
+    if (!isAdmin && !isOwner && !isPerm) {
+      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+      return;
+    }
+
+    const diagnostics = voiceManager.getPerformanceDiagnostics(interaction.guild.id);
+    
+    const diagEmbed = new EmbedBuilder()
+      .setTitle('🔧 Voice Connection Diagnostics')
+      .setColor(diagnostics.isConnected ? 0x00FF00 : 0xFF0000)
+      .addFields(
+        { name: '🔌 Connection Status', value: diagnostics.connectionStatus, inline: true },
+        { name: '📡 Connected', value: diagnostics.isConnected ? '✅ Yes' : '❌ No', inline: true },
+        { name: '⏱️ Average Latency', value: diagnostics.averageLatency, inline: true },
+        { name: '📊 Total Messages', value: diagnostics.totalMessages.toString(), inline: true },
+        { name: '❌ Failed Messages', value: diagnostics.failedMessages.toString(), inline: true },
+        { name: '✅ Success Rate', value: diagnostics.successRate, inline: true }
+      )
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [diagEmbed], ephemeral: true });
+    return;
   }
 });
 
