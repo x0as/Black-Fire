@@ -30,3 +30,9 @@ coverage/
 # Build output
 dist/
 build/
+
+# Temporary files
+temp/
+*.tmp
+*.wav
+*.mp3
