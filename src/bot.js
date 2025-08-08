@@ -6,6 +6,18 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import express from 'express';
 import axios from 'axios';
+import path from 'path';
+
+// Voice imports
+import { 
+  joinVoiceChannel, 
+  createAudioPlayer, 
+  createAudioResource, 
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  entersState
+} from '@discordjs/voice';
+import { spawn } from 'child_process';
 
 // Express web service for uptime monitoring
 const app = express();
@@ -20,14 +32,339 @@ app.listen(PORT, () => {
 const TOKEN = process.env.BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
+// Integrated Voice Manager Class
+class UltraFastVoiceManager {
+  constructor(client) {
+    this.client = client;
+    this.connections = new Map();
+    this.players = new Map();
+    
+    // Audio settings optimized for ultra-low latency
+    this.audioDir = path.join(process.cwd(), 'temp/audio');
+    
+    // Ensure audio directory exists
+    if (!fs.existsSync(this.audioDir)) {
+      fs.mkdirSync(this.audioDir, { recursive: true });
+    }
+
+    // Performance tracking
+    this.performanceStats = {
+      averageLatency: 0,
+      totalMessages: 0,
+      failedMessages: 0
+    };
+
+    // Pre-generate common phrases for instant playback
+    this.preGeneratedAudio = new Map();
+    this.initializeCommonPhrases();
+  }
+
+  async initializeCommonPhrases() {
+    const commonPhrases = [
+      'Hi!', 'Hello!', 'Yes', 'No', 'Okay',
+      'Got it', 'Ready', 'Done', 'Sure', 'Thanks'
+    ];
+
+    console.log('🔄 Pre-generating common phrases for instant playback...');
+    
+    for (const phrase of commonPhrases) {
+      try {
+        const audioPath = path.join(this.audioDir, `prebuilt_${phrase.toLowerCase().replace(/[^a-z]/g, '')}.wav`);
+        
+        const psScript = `
+Add-Type -AssemblyName System.Speech
+$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$synth.SelectVoice("Microsoft Zira Desktop")
+$synth.Rate = 5
+$synth.Volume = 100
+$synth.SetOutputToWaveFile("${audioPath.replace(/\\/g, '\\\\')}")
+$synth.Speak("${phrase}")
+$synth.Dispose()
+`;
+
+        await new Promise((resolve) => {
+          const psProcess = spawn('powershell', ['-Command', psScript], {
+            windowsHide: true,
+            stdio: ['ignore', 'ignore', 'ignore']
+          });
+
+          psProcess.on('exit', (code) => {
+            if (code === 0 && fs.existsSync(audioPath)) {
+              this.preGeneratedAudio.set(phrase.toLowerCase(), audioPath);
+              console.log(`✅ Pre-generated: "${phrase}"`);
+            }
+            resolve();
+          });
+
+          psProcess.on('error', () => resolve());
+          setTimeout(() => { psProcess.kill(); resolve(); }, 3000);
+        });
+      } catch (error) {
+        console.error(`Failed to pre-generate "${phrase}":`, error);
+      }
+    }
+    
+    console.log(`🎯 Pre-generated ${this.preGeneratedAudio.size} phrases for instant playback`);
+  }
+
+  async joinChannel(channel, userId) {
+    try {
+      const connection = joinVoiceChannel({
+        channelId: channel.id,
+        guildId: channel.guild.id,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+        selfDeaf: false,
+        selfMute: false,
+        debug: false
+      });
+
+      await entersState(connection, VoiceConnectionStatus.Ready, 10000);
+      
+      const player = createAudioPlayer({
+        debug: false,
+        behaviors: {
+          noSubscriber: 'pause',
+          maxMissedFrames: 1,
+        }
+      });
+      
+      connection.subscribe(player);
+      
+      this.connections.set(channel.guild.id, connection);
+      this.players.set(channel.guild.id, player);
+      
+      console.log(`✅ Starfire joined voice channel: ${channel.name}`);
+      await this.speak(channel.guild.id, "Ready", true);
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to join voice channel:', error);
+      return false;
+    }
+  }
+
+  async speak(guildId, text, isTest = false) {
+    const startTime = Date.now();
+    
+    try {
+      const player = this.players.get(guildId);
+      if (!player) {
+        console.log('❌ No player found for guild');
+        return false;
+      }
+
+      const lowerText = text.toLowerCase().trim();
+      const preGeneratedPath = this.preGeneratedAudio.get(lowerText);
+      
+      if (preGeneratedPath && fs.existsSync(preGeneratedPath)) {
+        return this.playInstantAudio(guildId, preGeneratedPath, text, startTime);
+      }
+
+      if (isTest) {
+        text = text.substring(0, 8);
+      } else {
+        if (text.length > 30) {
+          text = text.substring(0, 27) + "...";
+        }
+      }
+
+      const audioPath = path.join(this.audioDir, `ultrafast_${Date.now()}.wav`);
+      
+      return new Promise((resolve) => {
+        const psScript = `
+Add-Type -AssemblyName System.Speech
+$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$synth.SelectVoice("Microsoft Zira Desktop")
+$synth.Rate = 10
+$synth.Volume = 100
+$synth.SetOutputToWaveFile("${audioPath.replace(/\\/g, '\\\\')}")
+$synth.Speak("${text.replace(/"/g, '\\"')}")
+$synth.Dispose()
+`;
+
+        const psProcess = spawn('powershell', ['-Command', psScript], {
+          windowsHide: true,
+          stdio: ['ignore', 'ignore', 'ignore'],
+          priority: 'high'
+        });
+
+        let hasResolved = false;
+        const cleanup = () => {
+          if (!hasResolved) {
+            hasResolved = true;
+            psProcess.kill();
+            this.performanceStats.failedMessages++;
+          }
+        };
+
+        const timeout = setTimeout(cleanup, 2000);
+
+        psProcess.on('exit', async (code) => {
+          if (hasResolved) return;
+          clearTimeout(timeout);
+          hasResolved = true;
+
+          if (code === 0 && fs.existsSync(audioPath)) {
+            this.playOptimizedAudio(guildId, audioPath, text, startTime, resolve);
+          } else {
+            console.error('Ultra-fast TTS generation failed');
+            this.performanceStats.failedMessages++;
+            resolve(false);
+          }
+        });
+
+        psProcess.on('error', (error) => {
+          if (hasResolved) return;
+          clearTimeout(timeout);
+          hasResolved = true;
+          console.error('PowerShell process error:', error);
+          this.performanceStats.failedMessages++;
+          resolve(false);
+        });
+      });
+
+    } catch (error) {
+      console.error('❌ Ultra-Fast TTS Error:', error);
+      this.performanceStats.failedMessages++;
+      return false;
+    }
+  }
+
+  playInstantAudio(guildId, audioPath, text, startTime) {
+    try {
+      const player = this.players.get(guildId);
+      if (!player) return false;
+
+      const resource = createAudioResource(audioPath, {
+        inputType: 'arbitrary',
+        inlineVolume: false
+      });
+
+      player.play(resource);
+
+      const latency = Date.now() - startTime;
+      this.updatePerformanceStats(latency);
+      console.log(`🚀 INSTANT Speaking (${latency}ms): "${text}"`);
+
+      return true;
+    } catch (error) {
+      console.error('Instant audio error:', error);
+      return false;
+    }
+  }
+
+  playOptimizedAudio(guildId, audioPath, text, startTime, resolve) {
+    try {
+      const player = this.players.get(guildId);
+      if (!player) {
+        resolve(false);
+        return;
+      }
+
+      const resource = createAudioResource(audioPath, {
+        inputType: 'arbitrary',
+        inlineVolume: false
+      });
+
+      player.play(resource);
+
+      player.once(AudioPlayerStatus.Playing, () => {
+        const latency = Date.now() - startTime;
+        this.updatePerformanceStats(latency);
+        console.log(`⚡ Fast Speaking (${latency}ms): "${text}"`);
+      });
+
+      player.once(AudioPlayerStatus.Idle, () => {
+        try {
+          fs.unlinkSync(audioPath);
+        } catch (e) {}
+        resolve(true);
+      });
+
+      player.once('error', (error) => {
+        console.error('Audio player error:', error);
+        this.performanceStats.failedMessages++;
+        resolve(false);
+      });
+
+    } catch (playError) {
+      console.error('Audio play error:', playError);
+      this.performanceStats.failedMessages++;
+      resolve(false);
+    }
+  }
+
+  updatePerformanceStats(latency) {
+    this.performanceStats.totalMessages++;
+    this.performanceStats.averageLatency = 
+      ((this.performanceStats.averageLatency * (this.performanceStats.totalMessages - 1)) + latency) / 
+      this.performanceStats.totalMessages;
+  }
+
+  getPerformanceDiagnostics(guildId) {
+    const connection = this.connections.get(guildId);
+    const avgLatency = this.performanceStats.averageLatency;
+    
+    let lagAnalysis = '🟢 Excellent';
+    if (avgLatency > 1000) lagAnalysis = '🔴 High Lag';
+    else if (avgLatency > 600) lagAnalysis = '🟡 Moderate Lag';
+    else if (avgLatency > 300) lagAnalysis = '🟠 Some Lag';
+    
+    return {
+      isConnected: this.isConnected(guildId),
+      connectionStatus: connection ? connection.state.status : 'No connection',
+      averageLatency: `${avgLatency.toFixed(2)}ms`,
+      lagAnalysis: lagAnalysis,
+      totalMessages: this.performanceStats.totalMessages,
+      failedMessages: this.performanceStats.failedMessages,
+      successRate: `${((this.performanceStats.totalMessages - this.performanceStats.failedMessages) / Math.max(1, this.performanceStats.totalMessages) * 100).toFixed(1)}%`,
+      preGeneratedPhrases: this.preGeneratedAudio.size,
+      recommendations: this.getRecommendations(avgLatency)
+    };
+  }
+
+  getRecommendations(avgLatency) {
+    if (avgLatency > 1000) {
+      return 'Check internet connection, switch to Ethernet, change Discord voice region';
+    } else if (avgLatency > 600) {
+      return 'Consider using Ethernet connection, check Discord voice server region';
+    } else if (avgLatency > 300) {
+      return 'Try changing Discord voice server region for better performance';
+    } else {
+      return 'Performance is good! Use common phrases for instant response';
+    }
+  }
+
+  leaveChannel(guildId) {
+    try {
+      const connection = this.connections.get(guildId);
+      if (connection) {
+        connection.destroy();
+        this.connections.delete(guildId);
+        this.players.delete(guildId);
+        console.log('✅ Starfire left voice channel');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Leave channel error:', error);
+      return false;
+    }
+  }
+
+  isConnected(guildId) {
+    const connection = this.connections.get(guildId);
+    return connection && connection.state.status === VoiceConnectionStatus.Ready;
+  }
+}
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 // Initialize Voice Manager
-import VoiceManager from './voice/ultraFastVoiceManager.js'; // Use ultra-fast version with pre-generated audio
-const voiceManager = new VoiceManager(client);
+const voiceManager = new UltraFastVoiceManager(client);
 
 let memory = {
   aiChannelId: null,
