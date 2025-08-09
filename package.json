@@ -4,7 +4,9 @@
   "description": "Discord bot for giveaways, AI chat, and moderation.",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js"
+    "start": "node src/bot.js",
+    "setup-tts": "bash scripts/install-tts.sh",
+    "postinstall": "echo 'Run npm run setup-tts to install text-to-speech dependencies if needed'"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",

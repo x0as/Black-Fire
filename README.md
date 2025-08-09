@@ -47,6 +47,19 @@ PORT=3000
 npm start
 ```
 
+### Text-to-Speech Setup
+If you encounter TTS errors, install dependencies:
+```bash
+# Run the TTS setup script
+npm run setup-tts
+
+# Or manually install espeak (Linux/Mac)
+sudo apt install espeak espeak-data  # Ubuntu/Debian
+brew install espeak                  # macOS
+
+# Windows uses built-in SAPI (no setup needed)
+```
+
 ## 🎤 Voice Commands
 
 | Command | Description | Permissions |
@@ -181,6 +194,8 @@ npm start 2>&1 | tee bot.log
 2. **"TTS generation failed"** - Verify audio dependencies
 3. **"No voice connection"** - Run `/vcjoin` first
 4. **"Permission denied"** - Check command permissions
+5. **"festival: not found"** - Install TTS dependencies with `npm run setup-tts`
+6. **"espeak: command not found"** - Run `sudo apt install espeak espeak-data`
 
 ### UAE-Specific Issues
 1. **Local testing fails** - Expected, use Codespaces

@@ -37,23 +37,52 @@ export async function textToSpeech(text, outputPath = null) {
 
     // Try Windows SAPI first (most reliable on Windows)
     if (process.platform === 'win32') {
-      // Use PowerShell with SAPI to generate TTS
+      // Use PowerShell with SAPI to generate TTS with feminine voice
       const psCommand = `
         Add-Type -AssemblyName System.Speech;
         $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;
+        
+        # Try to select a female voice
+        $femaleVoices = $synth.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Gender -eq 'Female' };
+        if ($femaleVoices.Count -gt 0) {
+          $synth.SelectVoice($femaleVoices[0].VoiceInfo.Name);
+        }
+        
+        # Set natural speech rate (slightly slower)
+        $synth.Rate = -1;
+        
         $synth.SetOutputToWaveFile('${outputPath.replace(/\\/g, '\\\\')}');
         $synth.Speak('${cleanText.replace(/'/g, "''")}');
         $synth.Dispose();
       `;
-      
+
       await execAsync(`powershell -Command "${psCommand}"`);
     } else {
-      // Linux/Mac: Try espeak or festival
+      // Linux/Mac: Use espeak with feminine, natural voice settings
       try {
-        await execAsync(`espeak "${cleanText}" -w "${outputPath}"`);
+        // Enhanced feminine voice settings:
+        // -v en+f4: use female voice variant 4 (more feminine)
+        // -s 140: slightly slower speed for more natural speech
+        // -p 60: higher pitch for feminine voice (default is 50)
+        // -a 100: amplitude/volume
+        // -g 10: gap between words for clarity
+        // -w: write to file
+        await execAsync(`espeak "${cleanText}" -v en+f4 -s 140 -p 60 -a 100 -g 10 -w "${outputPath}"`);
       } catch (e) {
-        // Fallback to festival
-        await execAsync(`echo "${cleanText}" | festival --tts --otype wav > "${outputPath}"`);
+        console.error('espeak with feminine voice failed:', e.message);
+        // Try alternative feminine voice
+        try {
+          await execAsync(`espeak "${cleanText}" -v en+f3 -s 140 -p 58 -a 100 -w "${outputPath}"`);
+        } catch (e2) {
+          console.error('Alternative feminine voice failed:', e2.message);
+          // Fallback to basic feminine settings
+          try {
+            await execAsync(`echo "${cleanText}" | espeak -v en+f2 -s 140 -p 55 -w "${outputPath}"`);
+          } catch (e3) {
+            console.error('All feminine voice attempts failed:', e3.message);
+            throw new Error(`espeak is not available or failed to generate audio. Please ensure espeak is installed on your system.`);
+          }
+        }
       }
     }
 
@@ -97,23 +126,38 @@ export function cleanupTTSFile(filePath) {
 }
 
 /**
- * Get available voices (Windows only)
+ * Get available voices
  */
 export async function getAvailableVoices() {
-  if (process.platform !== 'win32') {
-    return ['default'];
-  }
-
   try {
-    const psCommand = `
-      Add-Type -AssemblyName System.Speech;
-      $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;
-      $synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name };
-      $synth.Dispose();
-    `;
-    
-    const { stdout } = await execAsync(`powershell -Command "${psCommand}"`);
-    return stdout.trim().split('\n').filter(voice => voice.trim());
+    if (process.platform === 'win32') {
+      const psCommand = `
+        Add-Type -AssemblyName System.Speech;
+        $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;
+        $synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name };
+        $synth.Dispose();
+      `;
+
+      const { stdout } = await execAsync(`powershell -Command "${psCommand}"`);
+      return stdout.trim().split('\n').filter(voice => voice.trim());
+    } else {
+      // Linux/Mac: Get espeak voices
+      try {
+        const { stdout } = await execAsync('espeak --voices');
+        const voices = stdout.split('\n')
+          .filter(line => line.trim() && !line.startsWith('Pty'))
+          .map(line => {
+            const parts = line.trim().split(/\s+/);
+            return parts[4] || parts[1] || 'default'; // Get language name or code
+          })
+          .filter(voice => voice && voice !== 'default');
+
+        return voices.length > 0 ? voices : ['en', 'en-us'];
+      } catch (error) {
+        console.error('Failed to get espeak voices:', error);
+        return ['en', 'en-us'];
+      }
+    }
   } catch (error) {
     console.error('Failed to get voices:', error);
     return ['default'];
