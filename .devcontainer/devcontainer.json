@@ -1,0 +1,40 @@
+{
+  "name": "Black-Fire Discord Bot",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-json",
+        "PKief.material-icon-theme",
+        "christian-kohler.path-intellisense",
+        "ms-vscode.vscode-typescript-next"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.formatOnSave": true
+      }
+    }
+  },
+  "postCreateCommand": "npm install && echo '🚀 Dependencies installed! Add your .env file with BOT_TOKEN, CLIENT_ID, MONGO_URI, etc.'",
+  "postStartCommand": "echo '🎤 Black-Fire Discord Bot ready! Voice features enabled for bypassing UAE Discord restrictions.'",
+  "remoteUser": "node",
+  "workspaceFolder": "/workspaces/Black-Fire",
+  "mounts": [
+    "source=discord-bot-node-modules,target=${containerWorkspaceFolder}/node_modules,type=volume"
+  ],
+  "containerEnv": {
+    "NODE_ENV": "development",
+    "TZ": "UTC"
+  },
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Bot Web Service",
+      "onAutoForward": "notify"
+    }
+  }
+}

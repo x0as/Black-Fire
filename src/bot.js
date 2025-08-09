@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { Client, GatewayIntentBits, Partials, Collection, ButtonBuilder, ButtonStyle, ActionRowBuilder, Events, REST, Routes, InteractionType, EmbedBuilder } from 'discord.js';
+import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, getVoiceConnection } from '@discordjs/voice';
 import fs from 'fs';
 import mongoose from 'mongoose';
 import express from 'express';
@@ -21,20 +22,24 @@ const TOKEN = process.env.BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent, 
+    GatewayIntentBits.GuildPresences, 
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates
+  ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
-
-// Initialize Voice Manager
-const VoiceManager = require('./voice/simpleVoiceManager'); // Use simple version for easier setup
-const voiceManager = new VoiceManager(client);
 
 let memory = {
   aiChannelId: null,
   giveaways: {},
   model: 'gemini-pro',
   userBehaviors: {}, // { [userId]: { mode: 'nice'|'flirty'|'baddie', nickname: string } }
-  supportersChannelId: null // Channel for /starlit supporter announcements
+  supportersChannelId: null, // Channel for /starlit supporter announcements
+  voiceConnections: new Map(), // guildId -> { connection, player, channelId }
 };
 
 // Store deleted messages for /snipe command
@@ -416,22 +421,21 @@ const commands = [
     ]
   },
   {
-    name: 'joinvc',
-    description: 'Make Starfire join your voice channel',
+    name: 'vcjoin',
+    description: 'Join a voice channel',
     options: [
-      { name: 'channel', description: 'Voice channel to join (optional)', type: 7, required: false }
+      { name: 'channel', description: 'Voice channel to join', type: 7, required: false }
     ]
   },
   {
-    name: 'leavevc',
-    description: 'Make Starfire leave the voice channel'
+    name: 'vcleave',
+    description: 'Leave the current voice channel'
   },
   {
-    name: 'speak',
-    description: 'Make Starfire say something in voice chat',
+    name: 'vcsay',
+    description: 'Make the bot say something in voice chat using text-to-speech',
     options: [
-      { name: 'text', description: 'What should Starfire say?', type: 3, required: true },
-      { name: 'voice', description: 'Voice type (female/male)', type: 3, required: false }
+      { name: 'text', description: 'Text to speak', type: 3, required: true }
     ]
   }
 ];
@@ -1504,8 +1508,8 @@ if (interaction.commandName === 'huzz' || interaction.commandName === 'huzzspade
     });
   }
 
-  // Voice Commands
-  if (interaction.commandName === 'joinvc') {
+  // Voice commands
+  if (interaction.commandName === 'vcjoin') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -1516,37 +1520,70 @@ if (interaction.commandName === 'huzz' || interaction.commandName === 'huzzspade
       return;
     }
 
-    let targetChannel = interaction.options.getChannel('channel');
-    
-    // If no channel specified, try to join user's current voice channel
-    if (!targetChannel) {
-      const voiceState = member.voice;
-      if (!voiceState.channel) {
-        await interaction.reply({ content: 'You need to be in a voice channel or specify one!', ephemeral: true });
+    const targetChannel = interaction.options.getChannel('channel');
+    let voiceChannel;
+
+    if (targetChannel) {
+      // Use specified channel
+      if (targetChannel.type !== 2) { // GUILD_VOICE = 2
+        await interaction.reply({ content: 'Please specify a voice channel.', ephemeral: true });
         return;
       }
-      targetChannel = voiceState.channel;
-    }
-
-    // Check if it's a voice channel
-    if (targetChannel.type !== 2) { // 2 = GUILD_VOICE
-      await interaction.reply({ content: 'Please specify a voice channel!', ephemeral: true });
-      return;
-    }
-
-    await interaction.deferReply();
-    
-    const success = await voiceManager.joinChannel(targetChannel, interaction.user.id);
-    
-    if (success) {
-      await interaction.editReply({ content: `✅ Starfire joined **${targetChannel.name}**! You can now speak to me using voice chat. I'll listen and respond with speech!` });
+      voiceChannel = targetChannel;
     } else {
-      await interaction.editReply({ content: '❌ Failed to join voice channel. Make sure I have permissions!' });
+      // Try to join user's current voice channel
+      const userMember = interaction.guild.members.cache.get(interaction.user.id);
+      if (!userMember.voice.channel) {
+        await interaction.reply({ content: 'You must be in a voice channel or specify one to join.', ephemeral: true });
+        return;
+      }
+      voiceChannel = userMember.voice.channel;
     }
-    return;
+
+    try {
+      // Check if already connected to this guild
+      const existingConnection = memory.voiceConnections.get(interaction.guild.id);
+      if (existingConnection) {
+        await interaction.reply({ content: `Already connected to <#${existingConnection.channelId}>. Use /vcleave first.`, ephemeral: true });
+        return;
+      }
+
+      const connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: interaction.guild.id,
+        adapterCreator: interaction.guild.voiceAdapterCreator,
+      });
+
+      const player = createAudioPlayer();
+      
+      // Store connection info
+      memory.voiceConnections.set(interaction.guild.id, {
+        connection,
+        player,
+        channelId: voiceChannel.id
+      });
+
+      connection.subscribe(player);
+
+      // Handle connection events
+      connection.on(VoiceConnectionStatus.Ready, () => {
+        console.log(`🎤 Connected to voice channel: ${voiceChannel.name}`);
+      });
+
+      connection.on(VoiceConnectionStatus.Disconnected, () => {
+        console.log(`🔇 Disconnected from voice channel: ${voiceChannel.name}`);
+        memory.voiceConnections.delete(interaction.guild.id);
+      });
+
+      await interaction.reply({ content: `🎤 Joined voice channel: <#${voiceChannel.id}>` });
+
+    } catch (error) {
+      console.error('Voice join error:', error);
+      await interaction.reply({ content: `Failed to join voice channel: ${error.message}`, ephemeral: true });
+    }
   }
 
-  if (interaction.commandName === 'leavevc') {
+  if (interaction.commandName === 'vcleave') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -1557,17 +1594,23 @@ if (interaction.commandName === 'huzz' || interaction.commandName === 'huzzspade
       return;
     }
 
-    const success = voiceManager.leaveChannel(interaction.guild.id);
-    
-    if (success) {
-      await interaction.reply({ content: '✅ Starfire left the voice channel!' });
-    } else {
-      await interaction.reply({ content: '❌ I\'m not connected to any voice channel!', ephemeral: true });
+    const voiceData = memory.voiceConnections.get(interaction.guild.id);
+    if (!voiceData) {
+      await interaction.reply({ content: 'Not currently connected to any voice channel.', ephemeral: true });
+      return;
     }
-    return;
+
+    try {
+      voiceData.connection.destroy();
+      memory.voiceConnections.delete(interaction.guild.id);
+      await interaction.reply({ content: '🔇 Left voice channel.' });
+    } catch (error) {
+      console.error('Voice leave error:', error);
+      await interaction.reply({ content: `Failed to leave voice channel: ${error.message}`, ephemeral: true });
+    }
   }
 
-  if (interaction.commandName === 'speak') {
+  if (interaction.commandName === 'vcsay') {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     const isAdmin = member && member.permissions.has('Administrator');
     const isOwner = interaction.user.id === '843061674378002453';
@@ -1575,33 +1618,54 @@ if (interaction.commandName === 'huzz' || interaction.commandName === 'huzzspade
     
     if (!isAdmin && !isOwner && !isPerm) {
       await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
-      return;
-    }
-
-    if (!voiceManager.isConnected(interaction.guild.id)) {
-      await interaction.reply({ content: '❌ I need to be in a voice channel first! Use `/joinvc`', ephemeral: true });
       return;
     }
 
     const text = interaction.options.getString('text');
-    const voiceType = interaction.options.getString('voice') || 'female';
+    const voiceData = memory.voiceConnections.get(interaction.guild.id);
     
-    await interaction.deferReply({ ephemeral: true });
-    
-    const voiceSettings = {
-      voiceName: voiceType === 'male' ? 'en-US-Neural2-D' : 'en-US-Neural2-F',
-      speakingRate: 1.1,
-      pitch: voiceType === 'male' ? -2.0 : 2.0
-    };
-    
-    const success = await voiceManager.speak(interaction.guild.id, text, voiceSettings);
-    
-    if (success) {
-      await interaction.editReply({ content: `✅ Speaking: "${text}"` });
-    } else {
-      await interaction.editReply({ content: '❌ Failed to speak! Make sure I\'m connected to voice.' });
+    if (!voiceData) {
+      await interaction.reply({ content: 'Not currently connected to any voice channel. Use /vcjoin first.', ephemeral: true });
+      return;
     }
-    return;
+
+    if (!text || text.trim().length === 0) {
+      await interaction.reply({ content: 'Please provide text to speak.', ephemeral: true });
+      return;
+    }
+
+    if (text.length > 500) {
+      await interaction.reply({ content: 'Text is too long. Maximum 500 characters.', ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply();
+
+    try {
+      // Import TTS functions dynamically
+      const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
+      
+      // Generate TTS
+      const audioPath = await textToSpeech(text);
+      const resource = createTTSResource(audioPath);
+      
+      // Set volume
+      resource.volume.setVolume(0.5);
+      
+      // Play audio
+      voiceData.player.play(resource);
+      
+      // Clean up file after playing
+      voiceData.player.once(AudioPlayerStatus.Idle, () => {
+        cleanupTTSFile(audioPath);
+      });
+
+      await interaction.editReply({ content: `🗣️ Speaking: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"` });
+
+    } catch (error) {
+      console.error('TTS error:', error);
+      await interaction.editReply({ content: `Failed to generate speech: ${error.message}` });
+    }
   }
 });
 
