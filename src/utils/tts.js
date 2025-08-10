@@ -59,25 +59,30 @@ export async function textToSpeech(text, outputPath = null) {
       await execAsync(`powershell -Command "${psCommand}"`);
     } else {
       // Linux/Mac: Use espeak with feminine, natural voice settings
-      // Enhanced feminine voice settings:
-      // -v en+f4: use female voice variant 4 (more feminine)
-      // -s 140: slightly slower speed for more natural speech
-      // -p 60: higher pitch for feminine voice (default is 50)
-      // -a 100: amplitude/volume
-      // -g 10: gap between words for clarity
-      // -w: write to file
-
-      console.log('🗣️ Generating TTS with espeak...');
-
-      // Try the best feminine voice settings first
       try {
-        const command = `espeak "${cleanText}" -v en+f4 -s 140 -p 60 -a 100 -g 10 -w "${outputPath}"`;
-        console.log('🎙️ Running command:', command);
-        await execAsync(command);
-        console.log('✅ TTS generation successful');
-      } catch (espeakError) {
-        console.error('❌ espeak command failed:', espeakError.message);
-        throw new Error(`espeak failed to generate audio: ${espeakError.message}`);
+        // Enhanced feminine voice settings:
+        // -v en+f4: use female voice variant 4 (more feminine)
+        // -s 140: slightly slower speed for more natural speech
+        // -p 60: higher pitch for feminine voice (default is 50)
+        // -a 100: amplitude/volume
+        // -g 10: gap between words for clarity
+        // -w: write to file
+        await execAsync(`espeak "${cleanText}" -v en+f4 -s 140 -p 60 -a 100 -g 10 -w "${outputPath}"`);
+      } catch (e) {
+        console.error('espeak with feminine voice failed:', e.message);
+        // Try alternative feminine voice
+        try {
+          await execAsync(`espeak "${cleanText}" -v en+f3 -s 140 -p 58 -a 100 -w "${outputPath}"`);
+        } catch (e2) {
+          console.error('Alternative feminine voice failed:', e2.message);
+          // Fallback to basic feminine settings
+          try {
+            await execAsync(`echo "${cleanText}" | espeak -v en+f2 -s 140 -p 55 -w "${outputPath}"`);
+          } catch (e3) {
+            console.error('All feminine voice attempts failed:', e3.message);
+            throw new Error(`espeak is not available or failed to generate audio. Please ensure espeak is installed on your system.`);
+          }
+        }
       }
     }
 
