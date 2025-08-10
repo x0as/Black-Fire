@@ -1891,6 +1891,11 @@ function detectUserEmotion(message) {
 }
 
 function sanitizeReply(content) {
+  // Handle undefined, null, or non-string content
+  if (!content || typeof content !== 'string') {
+    return 'Sorry, I couldn\'t generate a response.';
+  }
+  
   content = content.replace(/@everyone/g, 'everyone');
   content = content.replace(/@here/g, 'here');
   content = content.replace(/<@&?\d+>/g, '[ping removed]');
@@ -2626,6 +2631,14 @@ client.on(Events.MessageCreate, async (message) => {
     try {
       addToConversationHistory(message.channel.id, "user", message.content);
       const aiResponse = await getTextResponse(message.content, message.channel.id, username, message.author.id);
+      
+      // Check if we got a valid response
+      if (!aiResponse || typeof aiResponse !== 'string') {
+        console.error('❌ AI response is invalid:', aiResponse);
+        await message.reply(sanitizeReply("Sorry, I couldn't generate a response right now."));
+        return;
+      }
+      
       addToConversationHistory(message.channel.id, "bot", aiResponse);
 
       // Split the response into properly sized chunks that don't cut off words
