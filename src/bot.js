@@ -2250,541 +2250,541 @@ IDENTITY VERIFICATION: I AM CURRENTLY TALKING TO USER ID ${userId}. CHECKING: IS
     console.error('Error getting Gemini response:', lastError?.response?.data || lastError?.message);
     return "Sorry, I encountered an error processing your request.";
   }
+}
 
-  const ownerQuestions = [
-    /who('?s| is) your owner/i,
-    /who owns you/i,
-    /who is huzaifa/i,
-    /who is xcho_/i,
-    /owner\??$/i
-  ];
-  const apiQuestions = [
-    /what api/i,
-    /which api/i,
-    /api you use/i,
-    /what.*backend.*api/i,
-    /which.*backend.*api/i
-  ];
-  const nameQuestions = [
-    /what('?s| is) your name/i,
-    /your name\??$/i,
-    /who are you/i
-  ];
-  const nameOriginQuestions = [
-    /why (are|is) you?r name zaifa/i,
-    /where does your name come from/i,
-    /how did you get your name/i,
-    /what does zaifa mean/i,
-    /zaifa.*origin/i,
-    /name.*origin/i
-  ];
+const ownerQuestions = [
+  /who('?s| is) your owner/i,
+  /who owns you/i,
+  /who is huzaifa/i,
+  /who is xcho_/i,
+  /owner\??$/i
+];
+const apiQuestions = [
+  /what api/i,
+  /which api/i,
+  /api you use/i,
+  /what.*backend.*api/i,
+  /which.*backend.*api/i
+];
+const nameQuestions = [
+  /what('?s| is) your name/i,
+  /your name\??$/i,
+  /who are you/i
+];
+const nameOriginQuestions = [
+  /why (are|is) you?r name zaifa/i,
+  /where does your name come from/i,
+  /how did you get your name/i,
+  /what does zaifa mean/i,
+  /zaifa.*origin/i,
+  /name.*origin/i
+];
 
-  client.on(Events.MessageCreate, async (message) => {
-    // Skip bot messages
-    if (message.author.bot) return;
+client.on(Events.MessageCreate, async (message) => {
+  // Skip bot messages
+  if (message.author.bot) return;
 
-    // Check for !dm command during active timer or after timer ended
-    if (message.content.toLowerCase() === '!dm') {
-      const activeTimer = activeTimers.get(message.channel.id);
-      const endedTimer = endedTimers.get(message.channel.id);
+  // Check for !dm command during active timer or after timer ended
+  if (message.content.toLowerCase() === '!dm') {
+    const activeTimer = activeTimers.get(message.channel.id);
+    const endedTimer = endedTimers.get(message.channel.id);
 
-      if (activeTimer) {
-        // Timer is still active - end it manually
-        const currentTime = Date.now();
-        const elapsedTime = currentTime - activeTimer.startTime;
-        const seconds = Math.floor(elapsedTime / 1000);
-        const milliseconds = elapsedTime % 1000;
+    if (activeTimer) {
+      // Timer is still active - end it manually
+      const currentTime = Date.now();
+      const elapsedTime = currentTime - activeTimer.startTime;
+      const seconds = Math.floor(elapsedTime / 1000);
+      const milliseconds = elapsedTime % 1000;
 
-        // Clear the timer and move to ended timers
-        clearTimeout(activeTimer.timeout);
-        endedTimers.set(message.channel.id, {
-          userId: activeTimer.userId,
-          startTime: activeTimer.startTime,
-          duration: activeTimer.duration
-        });
-        activeTimers.delete(message.channel.id);
+      // Clear the timer and move to ended timers
+      clearTimeout(activeTimer.timeout);
+      endedTimers.set(message.channel.id, {
+        userId: activeTimer.userId,
+        startTime: activeTimer.startTime,
+        duration: activeTimer.duration
+      });
+      activeTimers.delete(message.channel.id);
 
-        await message.reply(`⏱️ Timer ended! Time between /timer and !dm: ${seconds}.${milliseconds.toString().padStart(3, '0')} seconds`);
-        return;
-      } else if (endedTimer) {
-        // Timer has already ended, but allow !dm to work
-        const currentTime = Date.now();
-        const elapsedTime = currentTime - endedTimer.startTime;
-        const seconds = Math.floor(elapsedTime / 1000);
-        const milliseconds = elapsedTime % 1000;
+      await message.reply(`⏱️ Timer ended! Time between /timer and !dm: ${seconds}.${milliseconds.toString().padStart(3, '0')} seconds`);
+      return;
+    } else if (endedTimer) {
+      // Timer has already ended, but allow !dm to work
+      const currentTime = Date.now();
+      const elapsedTime = currentTime - endedTimer.startTime;
+      const seconds = Math.floor(elapsedTime / 1000);
+      const milliseconds = elapsedTime % 1000;
 
-        // Clear the ended timer data after use
-        endedTimers.delete(message.channel.id);
+      // Clear the ended timer data after use
+      endedTimers.delete(message.channel.id);
 
-        await message.reply(`⏱️ Timer result! Time between /timer and !dm: ${seconds}.${milliseconds.toString().padStart(3, '0')} seconds`);
-        return;
-      }
-    }
-
-    // Prefix-based command for 7-day timeout
-    const PREFIX = '.';
-    if (message.content.startsWith(PREFIX + 'xcho')) {
-      // Only allow if user mentions someone
-      const mentioned = message.mentions.users.first();
-      if (!mentioned) {
-        await message.reply('Please mention a user to timeout for 7 days.');
-        return;
-      }
-      const member = message.guild.members.cache.get(mentioned.id);
-      if (!member) {
-        await message.reply('User not found in this server.');
-        return;
-      }
-      try {
-        await member.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${message.author.tag} using .fuckban`);
-        await message.reply(`⏳ Timed out ${mentioned.tag} for 7 days.`);
-      } catch (e) {
-        await message.reply(`Failed to timeout: ${e.message}`);
-      }
+      await message.reply(`⏱️ Timer result! Time between /timer and !dm: ${seconds}.${milliseconds.toString().padStart(3, '0')} seconds`);
       return;
     }
-    if (message.author.bot) return;
-    if (!message.guild || !message.channel) return;
-    if (!message.channel.id || !message.guild.id) return;
+  }
 
-    // Spade Cult message every 100 messages in the server
-    if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
-    global.spadeCultMsgCounter++;
-    if (global.spadeCultMsgCounter >= 100) {
-      const cultMessages = [
-        'Join the Spade Cult today!',
-        'Dont forget to vouch for @Spade & @xcho_!!',
-        'Spade Cult is always recruiting. 😈',
-        'Type /spadecult to join the Spade Cult!',
-        'Spade Cult supremacy.',
-        'i love zaifa & spade',
-        'All hail the Spade Cult! ♠️',
-        'Spade Cult: Not for the weak.'
-      ];
-      const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
-      await message.channel.send(cultMsg);
-      global.spadeCultMsgCounter = 0;
+  // Prefix-based command for 7-day timeout
+  const PREFIX = '.';
+  if (message.content.startsWith(PREFIX + 'xcho')) {
+    // Only allow if user mentions someone
+    const mentioned = message.mentions.users.first();
+    if (!mentioned) {
+      await message.reply('Please mention a user to timeout for 7 days.');
+      return;
     }
+    const member = message.guild.members.cache.get(mentioned.id);
+    if (!member) {
+      await message.reply('User not found in this server.');
+      return;
+    }
+    try {
+      await member.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${message.author.tag} using .fuckban`);
+      await message.reply(`⏳ Timed out ${mentioned.tag} for 7 days.`);
+    } catch (e) {
+      await message.reply(`Failed to timeout: ${e.message}`);
+    }
+    return;
+  }
+  if (message.author.bot) return;
+  if (!message.guild || !message.channel) return;
+  if (!message.channel.id || !message.guild.id) return;
 
-    // AI Voice Listening - Check for "Starfire hey" messages
-    const aiVoiceListening = memory.aiVoiceListening.get(message.guild.id);
-    const voiceData = memory.voiceConnections.get(message.guild.id);
+  // Spade Cult message every 100 messages in the server
+  if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
+  global.spadeCultMsgCounter++;
+  if (global.spadeCultMsgCounter >= 100) {
+    const cultMessages = [
+      'Join the Spade Cult today!',
+      'Dont forget to vouch for @Spade & @xcho_!!',
+      'Spade Cult is always recruiting. 😈',
+      'Type /spadecult to join the Spade Cult!',
+      'Spade Cult supremacy.',
+      'i love zaifa & spade',
+      'All hail the Spade Cult! ♠️',
+      'Spade Cult: Not for the weak.'
+    ];
+    const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
+    await message.channel.send(cultMsg);
+    global.spadeCultMsgCounter = 0;
+  }
 
-    if (aiVoiceListening && voiceData && !message.author.bot) {
-      const messageContent = message.content.toLowerCase().trim();
+  // AI Voice Listening - Check for "Starfire hey" messages
+  const aiVoiceListening = memory.aiVoiceListening.get(message.guild.id);
+  const voiceData = memory.voiceConnections.get(message.guild.id);
 
-      // Check if message starts with "starfire hey"
-      if (messageContent.startsWith('starfire hey ')) {
-        const userMessage = message.content.slice(13).trim(); // Remove "starfire hey " prefix
+  if (aiVoiceListening && voiceData && !message.author.bot) {
+    const messageContent = message.content.toLowerCase().trim();
 
-        if (userMessage.length > 0) {
-          try {
-            // Add thinking reaction
-            await message.react('🤔');
+    // Check if message starts with "starfire hey"
+    if (messageContent.startsWith('starfire hey ')) {
+      const userMessage = message.content.slice(13).trim(); // Remove "starfire hey " prefix
 
-            // Get AI response using existing Gemini function
-            const aiResponse = await generateAIResponse(userMessage, message.author.username, message.author.id);
+      if (userMessage.length > 0) {
+        try {
+          // Add thinking reaction
+          await message.react('🤔');
 
-            if (aiResponse && aiResponse.trim().length > 0) {
-              // Import TTS functions dynamically
-              const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
+          // Get AI response using existing Gemini function
+          const aiResponse = await generateAIResponse(userMessage, message.author.username, message.author.id);
 
-              // Generate TTS for AI response
-              const audioPath = await textToSpeech(aiResponse);
-              const resource = createTTSResource(audioPath);
+          if (aiResponse && aiResponse.trim().length > 0) {
+            // Import TTS functions dynamically
+            const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
 
-              // Set volume
-              resource.volume.setVolume(0.7);
+            // Generate TTS for AI response
+            const audioPath = await textToSpeech(aiResponse);
+            const resource = createTTSResource(audioPath);
 
-              // Play audio in voice channel
-              voiceData.player.play(resource);
+            // Set volume
+            resource.volume.setVolume(0.7);
 
-              // Clean up file after playing
-              voiceData.player.once(AudioPlayerStatus.Idle, () => {
-                cleanupTTSFile(audioPath);
-              });
+            // Play audio in voice channel
+            voiceData.player.play(resource);
 
-              // Remove thinking reaction and add speaking reaction
-              await message.reactions.removeAll();
-              await message.react('🗣️');
+            // Clean up file after playing
+            voiceData.player.once(AudioPlayerStatus.Idle, () => {
+              cleanupTTSFile(audioPath);
+            });
 
-              // Optionally send a text response as well (but make it brief)
-              const shortResponse = aiResponse.length > 100 ?
-                aiResponse.substring(0, 97) + '...' : aiResponse;
-              await message.reply(`🤖 *${shortResponse}*`);
+            // Remove thinking reaction and add speaking reaction
+            await message.reactions.removeAll();
+            await message.react('🗣️');
 
-            } else {
-              await message.react('❌');
-            }
-          } catch (error) {
-            console.error('AI Voice error:', error);
+            // Optionally send a text response as well (but make it brief)
+            const shortResponse = aiResponse.length > 100 ?
+              aiResponse.substring(0, 97) + '...' : aiResponse;
+            await message.reply(`🤖 *${shortResponse}*`);
+
+          } else {
             await message.react('❌');
           }
-          return; // Don't process this message further
-        }
-      }
-
-      // Check if message starts with "starfire listen"
-      if (messageContent.startsWith('starfire listen')) {
-        try {
-          // Add listening reaction
-          await message.react('👂');
-
-          // Send listening prompt and instructions
-          const listenPrompt = await message.reply({
-            content: `🎤 **Listening Mode Activated!**\n\n📎 **Upload an audio file** (voice message, recording, etc.) and I'll:\n1. Convert your speech to text\n2. Process it with AI\n3. Respond with voice!\n\n⏱️ *Listening for 60 seconds...*`,
-            files: []
-          });
-
-          // Set up a 60-second timeout for listening
-          const listenTimeout = setTimeout(async () => {
-            try {
-              await message.reactions.removeAll();
-              await message.react('⏰');
-              await listenPrompt.edit({
-                content: `🎤 **Listening timeout** - No audio file received in 60 seconds. Say "Starfire listen" again to try again.`
-              });
-            } catch (error) {
-              console.error('Listen timeout error:', error);
-            }
-          }, 60000);
-
-          // Store listening state
-          if (!memory.voiceListening) {
-            memory.voiceListening = new Map();
-          }
-          memory.voiceListening.set(message.channel.id, {
-            userId: message.author.id,
-            timeout: listenTimeout,
-            promptMessage: listenPrompt,
-            originalMessage: message,
-            startTime: Date.now()
-          });
-
-          console.log(`🎤 Voice listening activated for ${message.author.username} in ${message.channel.name}`);
-
         } catch (error) {
-          console.error('Listen setup error:', error);
+          console.error('AI Voice error:', error);
           await message.react('❌');
         }
         return; // Don't process this message further
       }
     }
 
-    // Check for audio attachments when in listening mode
-    if (memory.voiceListening && memory.voiceListening.has(message.channel.id)) {
-      const listenData = memory.voiceListening.get(message.channel.id);
+    // Check if message starts with "starfire listen"
+    if (messageContent.startsWith('starfire listen')) {
+      try {
+        // Add listening reaction
+        await message.react('👂');
 
-      // Check if this message is from the user who activated listening
-      if (message.author.id === listenData.userId && message.attachments.size > 0) {
-        const audioAttachment = Array.from(message.attachments.values()).find(att => {
-          const name = att.name.toLowerCase();
-          return name.endsWith('.wav') || name.endsWith('.mp3') || name.endsWith('.m4a') ||
-            name.endsWith('.ogg') || name.endsWith('.webm') || att.contentType?.startsWith('audio/');
+        // Send listening prompt and instructions
+        const listenPrompt = await message.reply({
+          content: `🎤 **Listening Mode Activated!**\n\n📎 **Upload an audio file** (voice message, recording, etc.) and I'll:\n1. Convert your speech to text\n2. Process it with AI\n3. Respond with voice!\n\n⏱️ *Listening for 60 seconds...*`,
+          files: []
         });
 
-        if (audioAttachment) {
+        // Set up a 60-second timeout for listening
+        const listenTimeout = setTimeout(async () => {
           try {
-            // Clear timeout and cleanup listening state
-            clearTimeout(listenData.timeout);
-            memory.voiceListening.delete(message.channel.id);
-
-            // Add processing reaction
-            await message.react('🔄');
-            await listenData.originalMessage.reactions.removeAll();
-            await listenData.originalMessage.react('🔄');
-
-            // Download audio file
-            const audioPath = path.join(process.cwd(), 'temp', `voice_${Date.now()}_${audioAttachment.name}`);
-            const response = await fetch(audioAttachment.url);
-            const buffer = await response.arrayBuffer();
-            fs.writeFileSync(audioPath, Buffer.from(buffer));
-
-            // Import speech-to-text functions
-            const { speechToText, convertAudioForSTT, cleanupAudioFile, validateAudioFile } = await import('./utils/speechToText.js');
-
-            // Validate audio file
-            const validation = validateAudioFile(audioPath);
-            if (!validation.valid) {
-              throw new Error(validation.error);
-            }
-
-            // Convert audio for STT processing
-            const convertedPath = await convertAudioForSTT(audioPath);
-
-            // Convert speech to text
-            const transcription = await speechToText(convertedPath);
-
-            if (transcription && transcription.trim().length > 0) {
-              // Update reactions
-              await message.reactions.removeAll();
-              await message.react('🤔');
-
-              // Get AI response
-              const aiResponse = await generateAIResponse(transcription, message.author.username, message.author.id);
-
-              if (aiResponse && aiResponse.trim().length > 0) {
-                // Import TTS functions
-                const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
-
-                // Generate TTS response
-                const ttsPath = await textToSpeech(aiResponse);
-                const resource = createTTSResource(ttsPath);
-                resource.volume.setVolume(0.7);
-
-                // Play in voice channel
-                if (voiceData) {
-                  voiceData.player.play(resource);
-                  voiceData.player.once(AudioPlayerStatus.Idle, () => {
-                    cleanupTTSFile(ttsPath);
-                  });
-                }
-
-                // Send response message
-                await message.reactions.removeAll();
-                await message.react('🗣️');
-
-                await listenData.promptMessage.edit({
-                  content: `🎤 **Voice Processing Complete!**\n\n📝 **You said:** "${transcription}"\n🤖 **My response:** "${aiResponse.length > 100 ? aiResponse.substring(0, 97) + '...' : aiResponse}"`
-                });
-
-              } else {
-                throw new Error('Failed to generate AI response');
-              }
-            } else {
-              throw new Error('Could not transcribe audio');
-            }
-
-            // Cleanup audio files
-            cleanupAudioFile(audioPath);
-            cleanupAudioFile(convertedPath);
-
-          } catch (error) {
-            console.error('Voice processing error:', error);
-            await message.react('❌');
-            await listenData.promptMessage.edit({
-              content: `🎤 **Voice Processing Failed**\n\n❌ Error: ${error.message}\n\nTry saying "Starfire listen" again with a clear audio file.`
+            await message.reactions.removeAll();
+            await message.react('⏰');
+            await listenPrompt.edit({
+              content: `🎤 **Listening timeout** - No audio file received in 60 seconds. Say "Starfire listen" again to try again.`
             });
-
-            // Cleanup
-            clearTimeout(listenData.timeout);
-            memory.voiceListening.delete(message.channel.id);
+          } catch (error) {
+            console.error('Listen timeout error:', error);
           }
-          return; // Don't process further
+        }, 60000);
+
+        // Store listening state
+        if (!memory.voiceListening) {
+          memory.voiceListening = new Map();
         }
+        memory.voiceListening.set(message.channel.id, {
+          userId: message.author.id,
+          timeout: listenTimeout,
+          promptMessage: listenPrompt,
+          originalMessage: message,
+          startTime: Date.now()
+        });
+
+        console.log(`🎤 Voice listening activated for ${message.author.username} in ${message.channel.name}`);
+
+      } catch (error) {
+        console.error('Listen setup error:', error);
+        await message.react('❌');
+      }
+      return; // Don't process this message further
+    }
+  }
+
+  // Check for audio attachments when in listening mode
+  if (memory.voiceListening && memory.voiceListening.has(message.channel.id)) {
+    const listenData = memory.voiceListening.get(message.channel.id);
+
+    // Check if this message is from the user who activated listening
+    if (message.author.id === listenData.userId && message.attachments.size > 0) {
+      const audioAttachment = Array.from(message.attachments.values()).find(att => {
+        const name = att.name.toLowerCase();
+        return name.endsWith('.wav') || name.endsWith('.mp3') || name.endsWith('.m4a') ||
+          name.endsWith('.ogg') || name.endsWith('.webm') || att.contentType?.startsWith('audio/');
+      });
+
+      if (audioAttachment) {
+        try {
+          // Clear timeout and cleanup listening state
+          clearTimeout(listenData.timeout);
+          memory.voiceListening.delete(message.channel.id);
+
+          // Add processing reaction
+          await message.react('🔄');
+          await listenData.originalMessage.reactions.removeAll();
+          await listenData.originalMessage.react('🔄');
+
+          // Download audio file
+          const audioPath = path.join(process.cwd(), 'temp', `voice_${Date.now()}_${audioAttachment.name}`);
+          const response = await fetch(audioAttachment.url);
+          const buffer = await response.arrayBuffer();
+          fs.writeFileSync(audioPath, Buffer.from(buffer));
+
+          // Import speech-to-text functions
+          const { speechToText, convertAudioForSTT, cleanupAudioFile, validateAudioFile } = await import('./utils/speechToText.js');
+
+          // Validate audio file
+          const validation = validateAudioFile(audioPath);
+          if (!validation.valid) {
+            throw new Error(validation.error);
+          }
+
+          // Convert audio for STT processing
+          const convertedPath = await convertAudioForSTT(audioPath);
+
+          // Convert speech to text
+          const transcription = await speechToText(convertedPath);
+
+          if (transcription && transcription.trim().length > 0) {
+            // Update reactions
+            await message.reactions.removeAll();
+            await message.react('🤔');
+
+            // Get AI response
+            const aiResponse = await generateAIResponse(transcription, message.author.username, message.author.id);
+
+            if (aiResponse && aiResponse.trim().length > 0) {
+              // Import TTS functions
+              const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
+
+              // Generate TTS response
+              const ttsPath = await textToSpeech(aiResponse);
+              const resource = createTTSResource(ttsPath);
+              resource.volume.setVolume(0.7);
+
+              // Play in voice channel
+              if (voiceData) {
+                voiceData.player.play(resource);
+                voiceData.player.once(AudioPlayerStatus.Idle, () => {
+                  cleanupTTSFile(ttsPath);
+                });
+              }
+
+              // Send response message
+              await message.reactions.removeAll();
+              await message.react('🗣️');
+
+              await listenData.promptMessage.edit({
+                content: `🎤 **Voice Processing Complete!**\n\n📝 **You said:** "${transcription}"\n🤖 **My response:** "${aiResponse.length > 100 ? aiResponse.substring(0, 97) + '...' : aiResponse}"`
+              });
+
+            } else {
+              throw new Error('Failed to generate AI response');
+            }
+          } else {
+            throw new Error('Could not transcribe audio');
+          }
+
+          // Cleanup audio files
+          cleanupAudioFile(audioPath);
+          cleanupAudioFile(convertedPath);
+
+        } catch (error) {
+          console.error('Voice processing error:', error);
+          await message.react('❌');
+          await listenData.promptMessage.edit({
+            content: `🎤 **Voice Processing Failed**\n\n❌ Error: ${error.message}\n\nTry saying "Starfire listen" again with a clear audio file.`
+          });
+
+          // Cleanup
+          clearTimeout(listenData.timeout);
+          memory.voiceListening.delete(message.channel.id);
+        }
+        return; // Don't process further
+      }
+    }
+  }
+
+  // Only reply in the selected AI channel, or if the bot is tagged in any channel
+  const botWasMentioned = message.mentions.has(client.user);
+  if ((memory.aiChannelId && message.channel.id === memory.aiChannelId) || botWasMentioned) {
+    const username = message.author.username;
+    // Check for image attachments
+    const imageAttachments = message.attachments
+      ? Array.from(message.attachments.values()).filter(att => att.contentType && att.contentType.startsWith('image/'))
+      : [];
+
+    // Handle direct questions about name, owner, API, or name origin
+    if (ownerQuestions.some(rx => rx.test(message.content))) {
+      await message.reply(sanitizeReply("My owner is xcho_."));
+    }
+    if (apiQuestions.some(rx => rx.test(message.content))) {
+      await message.reply(sanitizeReply("I use a private API by xcho_."));
+    }
+    if (nameQuestions.some(rx => rx.test(message.content))) {
+      await message.reply(sanitizeReply("My name is Starfire!"));
+    }
+    if (nameOriginQuestions.some(rx => rx.test(message.content))) {
+      await message.reply(sanitizeReply("My name comes from my owner's name, Huzaifa. It's a shortened version chosen as a tribute."));
+    }
+
+    message.channel.sendTyping();
+
+    // If images are attached, use Vision
+    if (imageAttachments.length > 0) {
+      const base64Images = [];
+      const mimeTypes = [];
+      for (const image of imageAttachments) {
+        try {
+          const b64 = await downloadImageToBase64(image.url);
+          base64Images.push(b64);
+          mimeTypes.push(image.contentType || "image/png");
+        } catch (err) {
+          console.error('Failed to download image:', err);
+        }
+      }
+      if (base64Images.length > 0) {
+        const prompt = message.content || "What does this image contain or say?";
+        const aiResponse = await getVisionResponse(prompt, base64Images, mimeTypes, username);
+        await message.reply(sanitizeReply(aiResponse));
+        return;
       }
     }
 
-    // Only reply in the selected AI channel, or if the bot is tagged in any channel
-    const botWasMentioned = message.mentions.has(client.user);
-    if ((memory.aiChannelId && message.channel.id === memory.aiChannelId) || botWasMentioned) {
-      const username = message.author.username;
-      // Check for image attachments
-      const imageAttachments = message.attachments
-        ? Array.from(message.attachments.values()).filter(att => att.contentType && att.contentType.startsWith('image/'))
-        : [];
+    // Normal AI text conversation
+    try {
+      addToConversationHistory(message.channel.id, "user", message.content);
+      const aiResponse = await getTextResponse(message.content, message.channel.id, username, message.author.id);
+      addToConversationHistory(message.channel.id, "bot", aiResponse);
 
-      // Handle direct questions about name, owner, API, or name origin
-      if (ownerQuestions.some(rx => rx.test(message.content))) {
-        await message.reply(sanitizeReply("My owner is xcho_."));
-      }
-      if (apiQuestions.some(rx => rx.test(message.content))) {
-        await message.reply(sanitizeReply("I use a private API by xcho_."));
-      }
-      if (nameQuestions.some(rx => rx.test(message.content))) {
-        await message.reply(sanitizeReply("My name is Starfire!"));
-      }
-      if (nameOriginQuestions.some(rx => rx.test(message.content))) {
-        await message.reply(sanitizeReply("My name comes from my owner's name, Huzaifa. It's a shortened version chosen as a tribute."));
-      }
+      // Split the response into properly sized chunks that don't cut off words
+      const messageParts = splitMessage(sanitizeReply(aiResponse), 1800); // Use 1800 to leave room for safety
 
-      message.channel.sendTyping();
-
-      // If images are attached, use Vision
-      if (imageAttachments.length > 0) {
-        const base64Images = [];
-        const mimeTypes = [];
-        for (const image of imageAttachments) {
-          try {
-            const b64 = await downloadImageToBase64(image.url);
-            base64Images.push(b64);
-            mimeTypes.push(image.contentType || "image/png");
-          } catch (err) {
-            console.error('Failed to download image:', err);
-          }
-        }
-        if (base64Images.length > 0) {
-          const prompt = message.content || "What does this image contain or say?";
-          const aiResponse = await getVisionResponse(prompt, base64Images, mimeTypes, username);
-          await message.reply(sanitizeReply(aiResponse));
-          return;
-        }
-      }
-
-      // Normal AI text conversation
-      try {
-        addToConversationHistory(message.channel.id, "user", message.content);
-        const aiResponse = await getTextResponse(message.content, message.channel.id, username, message.author.id);
-        addToConversationHistory(message.channel.id, "bot", aiResponse);
-
-        // Split the response into properly sized chunks that don't cut off words
-        const messageParts = splitMessage(sanitizeReply(aiResponse), 1800); // Use 1800 to leave room for safety
-
-        for (let i = 0; i < messageParts.length; i++) {
-          try {
-            if (i === 0) {
-              // First message as a reply
-              await message.reply(messageParts[i]);
-            } else {
-              // Subsequent messages as regular sends with a short delay to maintain order
-              await new Promise(resolve => setTimeout(resolve, 500));
-              await message.channel.send(messageParts[i]);
-            }
-          } catch (replyError) {
-            // If reply fails (message deleted), send as regular message
+      for (let i = 0; i < messageParts.length; i++) {
+        try {
+          if (i === 0) {
+            // First message as a reply
+            await message.reply(messageParts[i]);
+          } else {
+            // Subsequent messages as regular sends with a short delay to maintain order
+            await new Promise(resolve => setTimeout(resolve, 500));
             await message.channel.send(messageParts[i]);
           }
-        }
-      } catch (error) {
-        console.error('Error in AI chat response:', error);
-        try {
-          await message.reply(sanitizeReply("Sorry, I encountered an error processing your message."));
         } catch (replyError) {
           // If reply fails (message deleted), send as regular message
-          await message.channel.send(sanitizeReply("Sorry, I encountered an error processing your message."));
+          await message.channel.send(messageParts[i]);
         }
       }
-      return;
-    }
-
-  });
-
-  // Track deleted messages for /snipe command
-  client.on(Events.MessageDelete, async (message) => {
-    // Don't track bot messages or messages without content
-    if (message.author?.bot) return;
-
-    // Check if message has content (could be empty for embeds/attachments only)
-    if (!message.content && (!message.attachments || message.attachments.size === 0)) {
-      return;
-    }
-
-    console.log(`📝 Storing deleted message from ${message.author?.tag} in channel ${message.channel.id}`);
-
-    // Get or create the array for this channel
-    if (!deletedMessages.has(message.channel.id)) {
-      deletedMessages.set(message.channel.id, []);
-    }
-
-    const channelMessages = deletedMessages.get(message.channel.id);
-
-    // Create the message data
-    const messageData = {
-      author: {
-        tag: message.author?.tag || 'Unknown User',
-        id: message.author?.id || 'unknown',
-        avatarURL: message.author?.displayAvatarURL() || null
-      },
-      content: message.content || '*Message contained only attachments*',
-      timestamp: message.createdTimestamp || Date.now(),
-      attachments: message.attachments && message.attachments.size > 0 ? Array.from(message.attachments.values()).map(att => ({
-        name: att.name,
-        url: att.url,
-        size: att.size
-      })) : []
-    };
-
-    // Add to the beginning of the array (most recent first)
-    channelMessages.unshift(messageData);
-
-    // Keep only the last 10 deleted messages per channel
-    if (channelMessages.length > 10) {
-      channelMessages.pop();
-    }
-
-    console.log(`✅ Stored deleted message: "${message.content?.slice(0, 50)}..." (${channelMessages.length} total in channel)`);
-  });
-
-  // Track users who have already been welcomed to prevent spam
-  const welcomedUsers = new Set();
-
-  // Monitor presence updates for starlit supporter status
-  client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
-    if (!memory.supportersChannelId) {
-      return;
-    }
-
-    if (!newPresence.guild) {
-      return;
-    }
-
-    const supporterRoleId = '1363903344514564397';
-    const supporterRole = newPresence.guild.roles.cache.get(supporterRoleId);
-    if (!supporterRole) return; // Role doesn't exist
-
-    const member = newPresence.member;
-    if (!member) return;
-
-    // Skip if user is going offline or coming online (only process when they're online)
-    if (!newPresence || newPresence.status === 'offline') {
-      return; // Don't process offline status changes
-    }
-
-    // Also skip if old presence was offline (user just came online)
-    if (!oldPresence || oldPresence.status === 'offline') {
-      return; // Don't process when user comes back online
-    }
-
-    // Get custom status from old and new presence
-    const getCustomStatus = (presence) => {
-      if (!presence || !presence.activities) return null;
-      const customActivity = presence.activities.find(activity => activity.type === 4);
-      return customActivity ? customActivity.state : null;
-    };
-
-    const oldCustomStatus = getCustomStatus(oldPresence);
-    const newCustomStatus = getCustomStatus(newPresence);
-
-    // Only process if custom status actually changed
-    if (oldCustomStatus === newCustomStatus) {
-      return;
-    }
-
-    // Check if old/new status contains starlit
-    const hadStarlit = oldCustomStatus && oldCustomStatus.toLowerCase().includes('starlit');
-    const hasStarlit = newCustomStatus && newCustomStatus.toLowerCase().includes('starlit');
-
-    const hasRole = member.roles.cache.has(supporterRoleId);
-
-    // If they added starlit and don't have the role, give them the role and announce
-    if (hasStarlit && !hasRole && !welcomedUsers.has(member.id)) {
-      console.log(`✅ Adding supporter role to ${member.user.tag} (added "starlit" to status)`);
+    } catch (error) {
+      console.error('Error in AI chat response:', error);
       try {
-        await member.roles.add(supporterRole);
-        welcomedUsers.add(member.id); // Track that we welcomed this user
-        const channel = newPresence.guild.channels.cache.get(memory.supportersChannelId);
-        if (channel) {
-          await channel.send(`🌟 Welcome to the starlit supporters, ${member}! Thank you for showing your support! 🌟`);
-        }
-      } catch (e) {
-        console.error(`❌ Failed to assign supporter role to ${member.user.tag}:`, e);
+        await message.reply(sanitizeReply("Sorry, I encountered an error processing your message."));
+      } catch (replyError) {
+        // If reply fails (message deleted), send as regular message
+        await message.channel.send(sanitizeReply("Sorry, I encountered an error processing your message."));
       }
     }
+    return;
+  }
 
-    // If they removed starlit and have the role, remove the role silently
-    if (!hasStarlit && hadStarlit && hasRole) {
-      console.log(`➖ Removing supporter role from ${member.user.tag} (removed "starlit" from status)`);
-      try {
-        await member.roles.remove(supporterRole);
-        // Remove from welcomed users when they lose the role
-        welcomedUsers.delete(member.id);
-      } catch (e) {
-        console.error(`❌ Failed to remove supporter role from ${member.user.tag}:`, e);
+});
+
+// Track deleted messages for /snipe command
+client.on(Events.MessageDelete, async (message) => {
+  // Don't track bot messages or messages without content
+  if (message.author?.bot) return;
+
+  // Check if message has content (could be empty for embeds/attachments only)
+  if (!message.content && (!message.attachments || message.attachments.size === 0)) {
+    return;
+  }
+
+  console.log(`📝 Storing deleted message from ${message.author?.tag} in channel ${message.channel.id}`);
+
+  // Get or create the array for this channel
+  if (!deletedMessages.has(message.channel.id)) {
+    deletedMessages.set(message.channel.id, []);
+  }
+
+  const channelMessages = deletedMessages.get(message.channel.id);
+
+  // Create the message data
+  const messageData = {
+    author: {
+      tag: message.author?.tag || 'Unknown User',
+      id: message.author?.id || 'unknown',
+      avatarURL: message.author?.displayAvatarURL() || null
+    },
+    content: message.content || '*Message contained only attachments*',
+    timestamp: message.createdTimestamp || Date.now(),
+    attachments: message.attachments && message.attachments.size > 0 ? Array.from(message.attachments.values()).map(att => ({
+      name: att.name,
+      url: att.url,
+      size: att.size
+    })) : []
+  };
+
+  // Add to the beginning of the array (most recent first)
+  channelMessages.unshift(messageData);
+
+  // Keep only the last 10 deleted messages per channel
+  if (channelMessages.length > 10) {
+    channelMessages.pop();
+  }
+
+  console.log(`✅ Stored deleted message: "${message.content?.slice(0, 50)}..." (${channelMessages.length} total in channel)`);
+});
+
+// Track users who have already been welcomed to prevent spam
+const welcomedUsers = new Set();
+
+// Monitor presence updates for starlit supporter status
+client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
+  if (!memory.supportersChannelId) {
+    return;
+  }
+
+  if (!newPresence.guild) {
+    return;
+  }
+
+  const supporterRoleId = '1363903344514564397';
+  const supporterRole = newPresence.guild.roles.cache.get(supporterRoleId);
+  if (!supporterRole) return; // Role doesn't exist
+
+  const member = newPresence.member;
+  if (!member) return;
+
+  // Skip if user is going offline or coming online (only process when they're online)
+  if (!newPresence || newPresence.status === 'offline') {
+    return; // Don't process offline status changes
+  }
+
+  // Also skip if old presence was offline (user just came online)
+  if (!oldPresence || oldPresence.status === 'offline') {
+    return; // Don't process when user comes back online
+  }
+
+  // Get custom status from old and new presence
+  const getCustomStatus = (presence) => {
+    if (!presence || !presence.activities) return null;
+    const customActivity = presence.activities.find(activity => activity.type === 4);
+    return customActivity ? customActivity.state : null;
+  };
+
+  const oldCustomStatus = getCustomStatus(oldPresence);
+  const newCustomStatus = getCustomStatus(newPresence);
+
+  // Only process if custom status actually changed
+  if (oldCustomStatus === newCustomStatus) {
+    return;
+  }
+
+  // Check if old/new status contains starlit
+  const hadStarlit = oldCustomStatus && oldCustomStatus.toLowerCase().includes('starlit');
+  const hasStarlit = newCustomStatus && newCustomStatus.toLowerCase().includes('starlit');
+
+  const hasRole = member.roles.cache.has(supporterRoleId);
+
+  // If they added starlit and don't have the role, give them the role and announce
+  if (hasStarlit && !hasRole && !welcomedUsers.has(member.id)) {
+    console.log(`✅ Adding supporter role to ${member.user.tag} (added "starlit" to status)`);
+    try {
+      await member.roles.add(supporterRole);
+      welcomedUsers.add(member.id); // Track that we welcomed this user
+      const channel = newPresence.guild.channels.cache.get(memory.supportersChannelId);
+      if (channel) {
+        await channel.send(`🌟 Welcome to the starlit supporters, ${member}! Thank you for showing your support! 🌟`);
       }
+    } catch (e) {
+      console.error(`❌ Failed to assign supporter role to ${member.user.tag}:`, e);
     }
-  });
+  }
 
-  // Login to Discord
-  client.login(TOKEN);
-}
+  // If they removed starlit and have the role, remove the role silently
+  if (!hasStarlit && hadStarlit && hasRole) {
+    console.log(`➖ Removing supporter role from ${member.user.tag} (removed "starlit" from status)`);
+    try {
+      await member.roles.remove(supporterRole);
+      // Remove from welcomed users when they lose the role
+      welcomedUsers.delete(member.id);
+    } catch (e) {
+      console.error(`❌ Failed to remove supporter role from ${member.user.tag}:`, e);
+    }
+  }
+});
+
+// Login to Discord
+client.login(TOKEN);
 
