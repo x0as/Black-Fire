@@ -2357,24 +2357,7 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.guild || !message.channel) return;
   if (!message.channel.id || !message.guild.id) return;
 
-  // Spade Cult message every 100 messages in the server
-  if (!global.spadeCultMsgCounter) global.spadeCultMsgCounter = 0;
-  global.spadeCultMsgCounter++;
-  if (global.spadeCultMsgCounter >= 100) {
-    const cultMessages = [
-      'Join the Spade Cult today!',
-      'Dont forget to vouch for @Spade & @xcho_!!',
-      'Spade Cult is always recruiting. 😈',
-      'Type /spadecult to join the Spade Cult!',
-      'Spade Cult supremacy.',
-      'i love zaifa & spade',
-      'All hail the Spade Cult! ♠️',
-      'Spade Cult: Not for the weak.'
-    ];
-    const cultMsg = cultMessages[Math.floor(Math.random() * cultMessages.length)];
-    await message.channel.send(cultMsg);
-    global.spadeCultMsgCounter = 0;
-  }
+  // ...existing code...
 
   // AI Voice Listening - Check for "Starfire hey" messages
   const aiVoiceListening = memory.aiVoiceListening.get(message.guild.id);
@@ -2435,9 +2418,11 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 
-  // Only reply in the selected AI channel, or if the bot is tagged in any channel
+  // Only reply in the designated AI channel, or if pinged by xcho outside that channel
   const botWasMentioned = message.mentions.has(client.user);
-  if ((memory.aiChannelId && message.channel.id === memory.aiChannelId) || botWasMentioned) {
+  const isOwner = message.author.id === '843061674378002453';
+  const inAIChannel = memory.aiChannelId && message.channel.id === memory.aiChannelId;
+  if (inAIChannel || (botWasMentioned && isOwner)) {
     const username = message.author.username;
     // Check for image attachments
     const imageAttachments = message.attachments
