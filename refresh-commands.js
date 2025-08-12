@@ -8,13 +8,6 @@ const CLIENT_ID = process.env.CLIENT_ID;
 
 const commands = [
   {
-    name: 'reroll',
-    description: 'Reroll a new winner for an ended or active giveaway',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true }
-    ]
-  },
-  {
     name: 'permsremove',
     description: 'Remove a user\'s permission to use all Starfire commands',
     options: [
@@ -58,59 +51,6 @@ const commands = [
       { name: 'nickname', description: 'Nickname for the user', type: 3, required: true },
       { name: 'gender', description: 'Gender of the user (e.g. male, female, nonbinary)', type: 3, required: true }
     ]
-  },
-  {
-    name: 'spade',
-    description: 'Start a spade-themed giveaway',
-    options: [
-      { name: 'duration', description: 'Duration in minutes', type: 4, required: true },
-      { name: 'prize', description: 'Prize for the giveaway', type: 3, required: true },
-      { name: 'color', description: 'Embed color (hex, e.g. #f1c40f)', type: 3, required: false },
-      { name: 'host', description: 'Host user (mention or ID)', type: 3, required: false },
-    ],
-  },
-  {
-    name: 'giveaway',
-    description: 'Start a giveaway',
-    options: [
-      { name: 'duration', description: 'Duration in minutes', type: 4, required: true },
-      { name: 'prize', description: 'Prize for the giveaway', type: 3, required: true },
-      { name: 'color', description: 'Embed color (hex, e.g. #f1c40f)', type: 3, required: false },
-      { name: 'host', description: 'Host user (mention or ID)', type: 3, required: false },
-    ],
-  },
-  {
-    name: 'editgiveaway',
-    description: 'Edit an active giveaway',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-      { name: 'prize', description: 'New prize', type: 3, required: false },
-      { name: 'duration', description: 'New duration in minutes', type: 4, required: false },
-      { name: 'color', description: 'New embed color (hex)', type: 3, required: false },
-      { name: 'host', description: 'New host user (mention or ID)', type: 3, required: false },
-    ],
-  },
-  {
-    name: 'deletegiveaway',
-    description: 'Delete an active giveaway',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-    ],
-  },
-  {
-    name: 'endgiveaway',
-    description: 'End an active giveaway immediately',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-    ],
-  },
-  {
-    name: 'huzz',
-    description: 'huzhuzhuz',
-    options: [
-      { name: 'message_id', description: 'Giveaway message ID', type: 3, required: true },
-      { name: 'winner', description: 'Winner user ID', type: 3, required: true },
-    ],
   },
   { name: '8ball', description: 'Ask the magic 8-ball a question', options: [{ name: 'question', description: 'Your question', type: 3, required: true }] },
   { name: 'coinflip', description: 'Flips a coin' },

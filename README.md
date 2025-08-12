@@ -8,7 +8,6 @@ A powerful Discord bot with AI personality system and voice capabilities, design
 - ✅ Multi-personality AI system (nice, flirty, baddie, ultra-obedient for xcho_)
 - ✅ Comprehensive user verification system
 - ✅ Supporters channel with automatic role assignment
-- ✅ Giveaway system with MongoDB persistence
 - ✅ Message tracking and leaderboards
 
 ### 🎵 Voice Features (NEW!)

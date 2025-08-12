@@ -1,7 +1,7 @@
 {
   "name": "project-blackfire",
   "version": "1.0.0",
-  "description": "Discord bot for giveaways, AI chat, and moderation.",
+  "description": "Discord bot for AI chat, voice interaction, and moderation.",
   "main": "src/bot.js",
   "scripts": {
     "start": "node src/bot.js",
