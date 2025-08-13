@@ -10,7 +10,7 @@ import axios from 'axios';
 
 // Express web service for uptime monitoring
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 app.get('/', (req, res) => {
   res.send('Discord bot is running!');
 });
@@ -400,6 +400,14 @@ client.once('ready', async () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Check if interaction is in a guild (not in DMs)
+  if (!interaction.guild) {
+    if (interaction.isCommand()) {
+      await interaction.reply({ content: 'This bot only works in servers, not in direct messages.', ephemeral: true });
+    }
+    return;
+  }
+
   // /permsremove: Remove Starfire perms from a user
   if (interaction.commandName === 'permsremove') {
     const member = interaction.guild.members.cache.get(interaction.user.id);

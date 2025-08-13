@@ -57,45 +57,65 @@ const commands = [
   { name: 'dailyboard', description: "Shows today's message leaderboard." },
   { name: 'leaderboard', description: 'Shows the all-time message leaderboard.' },
   { name: 'meme', description: 'Get a random meme from Reddit.' },
-  { name: 'mod', description: 'Moderation commands', options: [
-    { name: 'ban', description: 'Ban a user', type: 1, options: [{ name: 'user', description: 'User to ban', type: 6, required: true }] },
-    { name: 'unban', description: 'Unban a user by ID', type: 1, options: [{ name: 'user_id', description: 'User ID to unban', type: 3, required: true }] },
-    { name: 'kick', description: 'Kick a user', type: 1, options: [{ name: 'user', description: 'User to kick', type: 6, required: true }] },
-    { name: 'mute', description: 'Mute a user', type: 1, options: [
-      { name: 'user', description: 'User to mute', type: 6, required: true },
-      { name: 'duration', description: 'Duration in minutes', type: 4, required: true }
-    ] },
-    { name: 'timeout', description: 'Timeout a user', type: 1, options: [
-      { name: 'user', description: 'User to timeout', type: 6, required: true },
-      { name: 'duration', description: 'Duration in minutes (max 10080)', type: 4, required: true }
-    ] },
-    { name: 'untimeout', description: 'Remove timeout from a user', type: 1, options: [
-      { name: 'user', description: 'User to remove timeout from', type: 6, required: true }
-    ] },
-    { name: 'purge', description: 'Delete messages', type: 1, options: [
-      { name: 'amount', description: 'Number of messages to delete', type: 4, required: true }
-    ] },
-  ] },
+  {
+    name: 'mod', description: 'Moderation commands', options: [
+      { name: 'ban', description: 'Ban a user', type: 1, options: [{ name: 'user', description: 'User to ban', type: 6, required: true }] },
+      { name: 'unban', description: 'Unban a user by ID', type: 1, options: [{ name: 'user_id', description: 'User ID to unban', type: 3, required: true }] },
+      { name: 'kick', description: 'Kick a user', type: 1, options: [{ name: 'user', description: 'User to kick', type: 6, required: true }] },
+      {
+        name: 'mute', description: 'Mute a user', type: 1, options: [
+          { name: 'user', description: 'User to mute', type: 6, required: true },
+          { name: 'duration', description: 'Duration in minutes', type: 4, required: true }
+        ]
+      },
+      {
+        name: 'timeout', description: 'Timeout a user', type: 1, options: [
+          { name: 'user', description: 'User to timeout', type: 6, required: true },
+          { name: 'duration', description: 'Duration in minutes (max 10080)', type: 4, required: true }
+        ]
+      },
+      {
+        name: 'untimeout', description: 'Remove timeout from a user', type: 1, options: [
+          { name: 'user', description: 'User to remove timeout from', type: 6, required: true }
+        ]
+      },
+      {
+        name: 'purge', description: 'Delete messages', type: 1, options: [
+          { name: 'amount', description: 'Number of messages to delete', type: 4, required: true }
+        ]
+      },
+    ]
+  },
   { name: 'ping', description: "Check the bot's latency." },
-  { name: 'reactionrole', description: 'Reaction role commands', options: [
-    { name: 'add', description: 'Set up a new reaction role', type: 1 },
-    { name: 'remove', description: 'Remove a reaction role', type: 1 }
-  ] },
-  { name: 'role', description: 'Role management', options: [
-    { name: 'add', description: 'Add a role to a member', type: 1, options: [
-      { name: 'user', description: 'User to add role to', type: 6, required: true },
-      { name: 'role', description: 'Role to add', type: 8, required: true }
-    ] },
-    { name: 'remove', description: 'Remove a role from a member', type: 1, options: [
-      { name: 'user', description: 'User to remove role from', type: 6, required: true },
-      { name: 'role', description: 'Role to remove', type: 8, required: true }
-    ] }
-  ] },
+  {
+    name: 'reactionrole', description: 'Reaction role commands', options: [
+      { name: 'add', description: 'Set up a new reaction role', type: 1 },
+      { name: 'remove', description: 'Remove a reaction role', type: 1 }
+    ]
+  },
+  {
+    name: 'role', description: 'Role management', options: [
+      {
+        name: 'add', description: 'Add a role to a member', type: 1, options: [
+          { name: 'user', description: 'User to add role to', type: 6, required: true },
+          { name: 'role', description: 'Role to add', type: 8, required: true }
+        ]
+      },
+      {
+        name: 'remove', description: 'Remove a role from a member', type: 1, options: [
+          { name: 'user', description: 'User to remove role from', type: 6, required: true },
+          { name: 'role', description: 'Role to remove', type: 8, required: true }
+        ]
+      }
+    ]
+  },
   { name: 'serverinfo', description: 'Get information about the server.' },
   { name: 'uptime', description: 'Shows how long the bot has been online.' },
-  { name: 'userinfo', description: 'Get information about a user.', options: [
-    { name: 'user', description: 'User to get info about', type: 6, required: false }
-  ] },
+  {
+    name: 'userinfo', description: 'Get information about a user.', options: [
+      { name: 'user', description: 'User to get info about', type: 6, required: false }
+    ]
+  },
 
   {
     name: 'setaichannel',
@@ -185,30 +205,30 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function refreshCommands() {
   try {
     console.log('🔄 Clearing existing slash commands...');
-    
+
     // Clear all existing commands first
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
     console.log('✅ Cleared existing commands');
-    
+
     // Wait a moment
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
+
     console.log('🔄 Registering new slash commands...');
-    
+
     // Register new commands
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
     console.log('✅ Successfully registered all slash commands!');
     console.log(`📊 Total commands: ${commands.length}`);
-    
+
     // List voice commands specifically
-    const voiceCommands = commands.filter(cmd => 
+    const voiceCommands = commands.filter(cmd =>
       ['joinvc', 'leavevc', 'speak', 'vcsay', 'voicediag'].includes(cmd.name)
     );
     console.log('🎤 Voice commands registered:');
     voiceCommands.forEach(cmd => {
       console.log(`  - /${cmd.name}: ${cmd.description}`);
     });
-    
+
   } catch (error) {
     console.error('❌ Error refreshing commands:', error);
   }
