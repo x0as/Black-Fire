@@ -34,7 +34,7 @@ const client = new Client({
 });
 
 let memory = {
-  aiChannelId: null,
+  aiChannels: new Map(), // guildId -> channelId (one AI channel per server)
   model: 'gemini-pro',
   userBehaviors: {}, // { [userId]: { mode: 'nice'|'flirty'|'baddie', nickname: string } }
   supportersChannelId: null, // Channel for /starlit supporter announcements
@@ -264,6 +264,10 @@ const commands = [
     description: 'Remove the AI channel (disable Starfire AI replies).'
   },
   {
+    name: 'aichannelinfo',
+    description: 'Show the current AI channel for this server.'
+  },
+  {
     name: 'commands',
     description: 'List all supported commands.'
   },
@@ -326,6 +330,37 @@ const commands = [
   }
 ];
 
+// Helper functions for per-guild AI channel management
+async function setGuildAIChannel(guildId, channelId) {
+  memory.aiChannels.set(guildId, channelId);
+  await setSetting(`aiChannel_${guildId}`, channelId);
+}
+
+async function removeGuildAIChannel(guildId) {
+  memory.aiChannels.delete(guildId);
+  await setSetting(`aiChannel_${guildId}`, null);
+}
+
+async function getGuildAIChannel(guildId) {
+  return memory.aiChannels.get(guildId);
+}
+
+async function loadAllAIChannels() {
+  // Load AI channels for all guilds from database
+  try {
+    const settings = await Settings.find({ key: { $regex: /^aiChannel_/ } });
+    for (const setting of settings) {
+      const guildId = setting.key.replace('aiChannel_', '');
+      if (setting.value) {
+        memory.aiChannels.set(guildId, setting.value);
+        console.log(`✅ Loaded AI channel for guild ${guildId}: ${setting.value}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error loading AI channels:', error);
+  }
+}
+
 // Store AI channel ID
 let aiChannelId = null;
 
@@ -347,7 +382,7 @@ client.once('ready', async () => {
   console.log('🔄 Loading settings from database...');
   try {
     memory.supportersChannelId = await getSetting('supportersChannelId');
-    memory.aiChannelId = await getSetting('aiChannelId');
+    await loadAllAIChannels(); // Load AI channels for all guilds
     console.log('✅ Settings loaded successfully');
   } catch (e) {
     console.error('❌ Error loading settings:', e);
@@ -552,9 +587,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
       return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
     }
-    memory.aiChannelId = channel.id;
-    await setSetting('aiChannelId', channel.id);
-    await interaction.reply({ content: `Starfire will now answer everything in <#${memory.aiChannelId}>.` });
+    await setGuildAIChannel(interaction.guild.id, channel.id);
+    await interaction.reply({ content: `Starfire will now answer everything in <#${channel.id}> for this server.` });
   }
   // Remove AI channel
   if (interaction.commandName === 'removeaichannel') {
@@ -566,10 +600,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.reply({ content: 'You do not have permission to remove the AI channel.', ephemeral: true });
       return;
     }
-    memory.aiChannelId = null;
-    await setSetting('aiChannelId', null);
-    await interaction.reply({ content: 'Starfire AI channel has been removed. AI replies are now disabled.' });
-    return;
+    await removeGuildAIChannel(interaction.guild.id);
+    await interaction.reply({ content: 'AI channel removed for this server. Starfire will no longer automatically respond to messages.' });
+  }
+  // AI Channel Info
+  if (interaction.commandName === 'aichannelinfo') {
+    const guildAIChannelId = await getGuildAIChannel(interaction.guild.id);
+    if (guildAIChannelId) {
+      await interaction.reply({ content: `Current AI channel for this server: <#${guildAIChannelId}>`, ephemeral: true });
+    } else {
+      await interaction.reply({ content: 'No AI channel is set for this server. Use `/setaichannel` to set one.', ephemeral: true });
+    }
   }
   // Status command
   if (interaction.commandName === 'status') {
@@ -2128,10 +2169,11 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 
-  // Only reply in the designated AI channel, or if pinged by xcho outside that channel
+  // Only reply in the designated AI channel for this guild, or if pinged by xcho outside that channel
   const botWasMentioned = message.mentions.has(client.user);
   const isOwner = message.author.id === '843061674378002453';
-  const inAIChannel = memory.aiChannelId && message.channel.id === memory.aiChannelId;
+  const guildAIChannelId = await getGuildAIChannel(message.guild.id);
+  const inAIChannel = guildAIChannelId && message.channel.id === guildAIChannelId;
   if (inAIChannel || (botWasMentioned && isOwner)) {
     const username = message.author.username;
     // Check for image attachments

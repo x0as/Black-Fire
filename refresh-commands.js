@@ -129,6 +129,10 @@ const commands = [
     description: 'Remove the AI channel (disable Starfire AI replies).'
   },
   {
+    name: 'aichannelinfo',
+    description: 'Show the current AI channel for this server.'
+  },
+  {
     name: 'commands',
     description: 'List all supported commands.'
   },
