@@ -2347,11 +2347,11 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 
-  // Only reply in the designated AI channel for this guild, or if pinged by xcho outside that channel
+  // Only reply in the designated AI channels for this guild, or if pinged by xcho outside those channels
   const botWasMentioned = message.mentions.has(client.user);
   const isOwner = message.author.id === '843061674378002453';
-  const guildAIChannelId = await getGuildAIChannel(message.guild.id);
-  const inAIChannel = guildAIChannelId && message.channel.id === guildAIChannelId;
+  const guildAIChannels = await getGuildAIChannels(message.guild.id);
+  const inAIChannel = guildAIChannels && guildAIChannels.has(message.channel.id);
   if (inAIChannel || (botWasMentioned && isOwner)) {
     const username = message.author.username;
     // Check for image attachments
