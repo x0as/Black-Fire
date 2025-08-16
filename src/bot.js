@@ -34,7 +34,7 @@ const client = new Client({
 });
 
 let memory = {
-  aiChannels: new Map(), // guildId -> channelId (one AI channel per server)
+  aiChannels: new Map(), // guildId -> Set<channelId> (multiple AI channels per server)
   model: 'gemini-pro',
   userBehaviors: {}, // { [userId]: { mode: 'nice'|'flirty'|'baddie', nickname: string } }
   supportersChannelId: null, // Channel for /starlit supporter announcements
@@ -254,18 +254,25 @@ const commands = [
 
   {
     name: 'setaichannel',
-    description: 'Set a channel for Gemini AI to answer everything',
+    description: 'Add a channel for Gemini AI to answer everything (can have multiple per server)',
     options: [
       { name: 'channel', description: 'Channel to enable Gemini AI', type: 7, required: true }
     ]
   },
   {
     name: 'removeaichannel',
-    description: 'Remove the AI channel (disable Starfire AI replies).'
+    description: 'Remove an AI channel (disable Starfire AI replies in that channel)',
+    options: [
+      { name: 'channel', description: 'Channel to remove AI from (leave empty to remove all)', type: 7, required: false }
+    ]
   },
   {
     name: 'aichannelinfo',
-    description: 'Show the current AI channel for this server.'
+    description: 'Show all AI channels for this server.'
+  },
+  {
+    name: 'listallai',
+    description: 'List all AI channels across servers (Admin only)'
   },
   {
     name: 'commands',
@@ -331,31 +338,84 @@ const commands = [
 ];
 
 // Helper functions for per-guild AI channel management
-async function setGuildAIChannel(guildId, channelId) {
-  memory.aiChannels.set(guildId, channelId);
-  await setSetting(`aiChannel_${guildId}`, channelId);
+async function addGuildAIChannel(guildId, channelId) {
+  if (!memory.aiChannels.has(guildId)) {
+    memory.aiChannels.set(guildId, new Set());
+  }
+  memory.aiChannels.get(guildId).add(channelId);
+
+  // Save to database - store as JSON array
+  const channels = Array.from(memory.aiChannels.get(guildId));
+  await setSetting(`aiChannels_${guildId}`, JSON.stringify(channels));
 }
 
-async function removeGuildAIChannel(guildId) {
+async function removeGuildAIChannel(guildId, channelId) {
+  if (memory.aiChannels.has(guildId)) {
+    memory.aiChannels.get(guildId).delete(channelId);
+
+    // If no channels left, remove the entry
+    if (memory.aiChannels.get(guildId).size === 0) {
+      memory.aiChannels.delete(guildId);
+      await setSetting(`aiChannels_${guildId}`, null);
+    } else {
+      // Save updated list to database
+      const channels = Array.from(memory.aiChannels.get(guildId));
+      await setSetting(`aiChannels_${guildId}`, JSON.stringify(channels));
+    }
+  }
+}
+
+async function removeAllGuildAIChannels(guildId) {
   memory.aiChannels.delete(guildId);
-  await setSetting(`aiChannel_${guildId}`, null);
+  await setSetting(`aiChannels_${guildId}`, null);
 }
 
-async function getGuildAIChannel(guildId) {
-  return memory.aiChannels.get(guildId);
+async function getGuildAIChannels(guildId) {
+  return memory.aiChannels.get(guildId) || new Set();
+}
+
+async function isAIChannel(guildId, channelId) {
+  const channels = memory.aiChannels.get(guildId);
+  return channels ? channels.has(channelId) : false;
 }
 
 async function loadAllAIChannels() {
   // Load AI channels for all guilds from database
   try {
-    const settings = await Settings.find({ key: { $regex: /^aiChannel_/ } });
-    for (const setting of settings) {
-      const guildId = setting.key.replace('aiChannel_', '');
+    // Load new format (multiple channels)
+    const newFormatSettings = await Settings.find({ key: { $regex: /^aiChannels_/ } });
+    for (const setting of newFormatSettings) {
+      const guildId = setting.key.replace('aiChannels_', '');
       if (setting.value) {
-        memory.aiChannels.set(guildId, setting.value);
-        console.log(`✅ Loaded AI channel for guild ${guildId}: ${setting.value}`);
+        try {
+          const channelArray = JSON.parse(setting.value);
+          memory.aiChannels.set(guildId, new Set(channelArray));
+          console.log(`✅ Loaded ${channelArray.length} AI channels for guild ${guildId}: ${channelArray.join(', ')}`);
+        } catch (e) {
+          console.error(`Error parsing AI channels for guild ${guildId}:`, e);
+        }
       }
     }
+
+    // Load old format (single channel) for backward compatibility
+    const oldFormatSettings = await Settings.find({ key: { $regex: /^aiChannel_/ } });
+    for (const setting of oldFormatSettings) {
+      const guildId = setting.key.replace('aiChannel_', '');
+      if (setting.value && !memory.aiChannels.has(guildId)) {
+        memory.aiChannels.set(guildId, new Set([setting.value]));
+        console.log(`✅ Migrated single AI channel for guild ${guildId}: ${setting.value}`);
+
+        // Migrate to new format
+        await setSetting(`aiChannels_${guildId}`, JSON.stringify([setting.value]));
+        await setSetting(`aiChannel_${guildId}`, null); // Remove old format
+      }
+    }
+
+    let totalChannels = 0;
+    for (const channels of memory.aiChannels.values()) {
+      totalChannels += channels.size;
+    }
+    console.log(`🤖 Total AI channels loaded: ${totalChannels} across ${memory.aiChannels.size} guilds`);
   } catch (error) {
     console.error('Error loading AI channels:', error);
   }
@@ -435,870 +495,988 @@ client.once('ready', async () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  // Check if interaction is in a guild (not in DMs)
-  if (!interaction.guild) {
-    if (interaction.isCommand()) {
-      await interaction.reply({ content: 'This bot only works in servers, not in direct messages.', ephemeral: true });
+  try {
+    // Check if interaction is in a guild (not in DMs)
+    if (!interaction.guild) {
+      if (interaction.isCommand()) {
+        await interaction.reply({ content: 'This bot only works in servers, not in direct messages.', ephemeral: true });
+      }
+      return;
     }
-    return;
-  }
 
-  // /permsremove: Remove Starfire perms from a user
-  if (interaction.commandName === 'permsremove') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
+    // /permsremove: Remove Starfire perms from a user
+    if (interaction.commandName === 'permsremove') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
+        return;
+      }
+      const userId = interaction.options.getString('user_id');
+      if (!userId) {
+        await interaction.reply({ content: 'User ID is required.', ephemeral: true });
+        return;
+      }
+      await removeStarfirePerm(userId);
+      await interaction.reply({ content: `<@${userId}> has been removed from Starfire command permissions.`, ephemeral: true });
       return;
     }
-    const userId = interaction.options.getString('user_id');
-    if (!userId) {
-      await interaction.reply({ content: 'User ID is required.', ephemeral: true });
+    // /perms: Grant Starfire perms to a user
+    if (interaction.commandName === 'perms') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
+        return;
+      }
+      const userId = interaction.options.getString('user_id');
+      if (!userId) {
+        await interaction.reply({ content: 'User ID is required.', ephemeral: true });
+        return;
+      }
+      await addStarfirePerm(userId);
+      await interaction.reply({ content: `<@${userId}> has been granted permission to use all Starfire commands.`, ephemeral: true });
       return;
     }
-    await removeStarfirePerm(userId);
-    await interaction.reply({ content: `<@${userId}> has been removed from Starfire command permissions.`, ephemeral: true });
-    return;
-  }
-  // /perms: Grant Starfire perms to a user
-  if (interaction.commandName === 'perms') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
-      return;
-    }
-    const userId = interaction.options.getString('user_id');
-    if (!userId) {
-      await interaction.reply({ content: 'User ID is required.', ephemeral: true });
-      return;
-    }
-    await addStarfirePerm(userId);
-    await interaction.reply({ content: `<@${userId}> has been granted permission to use all Starfire commands.`, ephemeral: true });
-    return;
-  }
-  // /nice, /flirty, /baddie: Set Starfire's behavior for a user
-  if (["nice", "flirty", "baddie"].includes(interaction.commandName)) {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-    if (!isAdmin && !isOwner && !isPerm) {
+    // /nice, /flirty, /baddie: Set Starfire's behavior for a user
+    if (["nice", "flirty", "baddie"].includes(interaction.commandName)) {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+      if (!isAdmin && !isOwner && !isPerm) {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        }
+        return;
+      }
+      const userId = interaction.options.getString('user_id');
+      const nickname = interaction.options.getString('nickname');
+      const gender = interaction.options.getString('gender');
+      if (!userId || !nickname || !gender) {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'User ID, nickname, and gender are required.', ephemeral: true });
+        }
+        return;
+      }
+      memory.userBehaviors[userId] = { mode: interaction.commandName, nickname, gender };
+      // Save persona to MongoDB
+      await savePersona(userId, interaction.commandName, nickname, gender);
       if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}, gender: ${gender}).`, ephemeral: true });
+      }
+      return;
+    }
+
+    // /resetpersona: Reset a user's persona back to default behavior
+    if (interaction.commandName === 'resetpersona') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+      if (!isAdmin && !isOwner && !isPerm) {
         await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        return;
       }
-      return;
-    }
-    const userId = interaction.options.getString('user_id');
-    const nickname = interaction.options.getString('nickname');
-    const gender = interaction.options.getString('gender');
-    if (!userId || !nickname || !gender) {
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: 'User ID, nickname, and gender are required.', ephemeral: true });
-      }
-      return;
-    }
-    memory.userBehaviors[userId] = { mode: interaction.commandName, nickname, gender };
-    // Save persona to MongoDB
-    await savePersona(userId, interaction.commandName, nickname, gender);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: `Starfire will now be **${interaction.commandName}** to <@${userId}> (nickname: ${nickname}, gender: ${gender}).`, ephemeral: true });
-    }
-    return;
-  }
-
-  // /resetpersona: Reset a user's persona back to default behavior
-  if (interaction.commandName === 'resetpersona') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-      return;
-    }
-    const userId = interaction.options.getString('user_id');
-    if (!userId) {
-      await interaction.reply({ content: 'Please provide a user_id.', ephemeral: true });
-      return;
-    }
-
-    // Remove from memory
-    delete memory.userBehaviors[userId];
-
-    // Remove from MongoDB
-    try {
-      await Persona.deleteOne({ userId: userId });
-    } catch (e) {
-      console.error('Error removing persona from MongoDB:', e);
-    }
-
-    await interaction.reply({ content: `Reset persona for <@${userId}>. They will now receive the default behavior.`, ephemeral: true });
-    return;
-  }
-
-  // /spadecult: Assign Spade Cult role to user
-  if (interaction.commandName === 'spadecult') {
-    const roleId = '1391511769842974870';
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const role = interaction.guild.roles.cache.get(roleId);
-    if (!role) {
-      await interaction.reply({ content: 'Spade Cult role not found in this server.', ephemeral: true });
-      return;
-    }
-    if (member.roles.cache.has(roleId)) {
-      await interaction.reply({ content: 'You already have the Spade Cult role!', ephemeral: true });
-      return;
-    }
-    try {
-      await member.roles.add(role);
-      await interaction.reply({ content: 'You have joined the Spade Cult! ♠️', ephemeral: false });
-    } catch (e) {
-      await interaction.reply({ content: `Failed to assign role: ${e.message}`, ephemeral: true });
-    }
-    return;
-  }
-  // /commands: List all supported commands
-  if (interaction.commandName === 'commands') {
-    const commandList = commands
-      .filter(cmd => cmd.name !== 'commands' && cmd.name !== 'huzz')
-      .map(cmd => `•  /${cmd.name} - ${cmd.description}`)
-      .join('\n');
-    const embed = new EmbedBuilder()
-      .setTitle('Supported Commands')
-      .setDescription(commandList)
-      .setColor(0x8e44ad);
-    await interaction.reply({ embeds: [embed] });
-    return;
-  }
-  // Set AI channel
-  if (interaction.commandName === 'setaichannel') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to set the AI channel.', ephemeral: true });
-      return;
-    }
-    const channel = interaction.options.getChannel('channel');
-    if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
-      return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
-    }
-    await setGuildAIChannel(interaction.guild.id, channel.id);
-    await interaction.reply({ content: `Starfire will now answer everything in <#${channel.id}> for this server.` });
-  }
-  // Remove AI channel
-  if (interaction.commandName === 'removeaichannel') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to remove the AI channel.', ephemeral: true });
-      return;
-    }
-    await removeGuildAIChannel(interaction.guild.id);
-    await interaction.reply({ content: 'AI channel removed for this server. Starfire will no longer automatically respond to messages.' });
-  }
-  // AI Channel Info
-  if (interaction.commandName === 'aichannelinfo') {
-    const guildAIChannelId = await getGuildAIChannel(interaction.guild.id);
-    if (guildAIChannelId) {
-      await interaction.reply({ content: `Current AI channel for this server: <#${guildAIChannelId}>`, ephemeral: true });
-    } else {
-      await interaction.reply({ content: 'No AI channel is set for this server. Use `/setaichannel` to set one.', ephemeral: true });
-    }
-  }
-  // Status command
-  if (interaction.commandName === 'status') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to change the bot status.', ephemeral: true });
-      return;
-    }
-    const text = interaction.options.getString('text');
-    try {
-      await client.user.setActivity(text, { type: 0 }); // 0 = Playing
-      const embed = new EmbedBuilder()
-        .setTitle('Bot Status Updated')
-        .setDescription(`Playing: ${text}`)
-        .setColor(0x16a085);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    } catch (e) {
-      const embed = new EmbedBuilder()
-        .setTitle('Status Error')
-        .setDescription(`Error updating status: ${e.message || e}`)
-        .setColor(0xe74c3c);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-    return;
-  }
-  // Supporters channel command
-  if (interaction.commandName === 'supporterschannel') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to set the supporters channel.', ephemeral: true });
-      return;
-    }
-    const channel = interaction.options.getChannel('channel');
-    if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
-      return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
-    }
-    console.log(`Setting up supporters channel: ${channel.name} (${channel.id})`);
-    memory.supportersChannelId = channel.id;
-
-    // Save to MongoDB
-    await setSetting('supportersChannelId', channel.id);
-
-    // Check existing members for starlit in their status and assign role
-    const supporterRoleId = '1363903344514564397';
-    const supporterRole = interaction.guild.roles.cache.get(supporterRoleId);
-    if (!supporterRole) {
-      console.log(`ERROR: Supporter role ${supporterRoleId} not found in server`);
-      return await interaction.reply({ content: 'Supporter role not found in this server.', ephemeral: true });
-    }
-
-    console.log(`Found supporter role: ${supporterRole.name}`);
-    let assignedCount = 0;
-
-    // Only fetch online members with presence data (much faster!)
-    const onlineMembers = new Map();
-    interaction.guild.presences.cache.forEach((presence, userId) => {
-      if (presence.status !== 'offline') {
-        const member = interaction.guild.members.cache.get(userId);
-        if (member) {
-          onlineMembers.set(userId, member);
-        }
-      }
-    });
-
-    console.log(`Found ${onlineMembers.size} online members to check for starlit status (instead of ${interaction.guild.memberCount} total)`);
-
-    for (const [userId, member] of onlineMembers) {
-      const presence = member.presence;
-      console.log(`Checking online member: ${member.user.tag} (${userId})`);
-
-      if (!presence.activities || presence.activities.length === 0) {
-        console.log(`  - No activities for ${member.user.tag}`);
-        continue;
+      const userId = interaction.options.getString('user_id');
+      if (!userId) {
+        await interaction.reply({ content: 'Please provide a user_id.', ephemeral: true });
+        return;
       }
 
-      console.log(`  - ${member.user.tag} has ${presence.activities.length} activities`);
+      // Remove from memory
+      delete memory.userBehaviors[userId];
 
-      const hasStarlit = presence.activities.some(activity => {
-        console.log(`    - Activity type: ${activity.type}, name: ${activity.name}, state: ${activity.state}`);
-
-        if (activity.type === 4) { // Custom status
-          if (activity.state) {
-            const hasMatch = activity.state.toLowerCase().includes('starlit');
-            console.log(`    - Custom status: "${activity.state}" - Contains starlit: ${hasMatch}`);
-            return hasMatch;
-          } else {
-            console.log(`    - Custom status with no state text`);
-          }
-        }
-        return false;
-      });
-
-      console.log(`  - ${member.user.tag} has starlit in status: ${hasStarlit}`);
-
-      if (hasStarlit && !member.roles.cache.has(supporterRoleId)) {
-        console.log(`  - Assigning supporter role to ${member.user.tag}`);
-        try {
-          await member.roles.add(supporterRole);
-          assignedCount++;
-
-          // Send announcement
-          const announceChannel = interaction.guild.channels.cache.get(memory.supportersChannelId);
-          if (announceChannel) {
-            await announceChannel.send({
-              content: `Thank you for supporting Starlit <@${userId}>! Here's your role! 🌟`
-            });
-            console.log(`  - Sent announcement for ${member.user.tag}`);
-          }
-        } catch (e) {
-          console.error(`  - Failed to assign supporter role to ${member.user.tag}:`, e);
-        }
-      } else if (hasStarlit && member.roles.cache.has(supporterRoleId)) {
-        console.log(`  - ${member.user.tag} already has supporter role (no announcement needed)`);
-      }
-    }
-
-    await interaction.reply({
-      content: `Supporters channel set to <#${memory.supportersChannelId}>. Assigned supporter role to ${assignedCount} existing members with starlit in their status.`
-    });
-    return;
-  }
-  if (interaction.type !== InteractionType.ApplicationCommand) return;
-
-  // 8ball
-  if (interaction.commandName === '8ball') {
-    const responses = ['Yes.', 'No.', 'Maybe.', 'Definitely!', 'Ask again later.', 'I don\'t know.', 'Absolutely!', 'Not a chance.'];
-    const answer = responses[Math.floor(Math.random() * responses.length)];
-    const embed = new EmbedBuilder()
-      .setTitle('🎱 Magic 8-Ball')
-      .setDescription(answer)
-      .setColor(0x3498db);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Coinflip
-  if (interaction.commandName === 'coinflip') {
-    const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
-    const embed = new EmbedBuilder()
-      .setTitle('🪙 Coin Flip')
-      .setDescription(result)
-      .setColor(0xf39c12);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Dailyboard
-  if (interaction.commandName === 'dailyboard') {
-    if (!global.dailyMessages) global.dailyMessages = {};
-    const today = new Date().toISOString().slice(0, 10);
-    const board = Object.entries(global.dailyMessages[today] || {})
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
-      .join('\n') || 'No messages today.';
-    const embed = new EmbedBuilder()
-      .setTitle('📅 Today\'s Leaderboard')
-      .setDescription(board)
-      .setColor(0x2ecc71);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Leaderboard
-  if (interaction.commandName === 'leaderboard') {
-    if (!global.allTimeMessages) global.allTimeMessages = {};
-    const board = Object.entries(global.allTimeMessages)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
-      .join('\n') || 'No messages yet.';
-    const embed = new EmbedBuilder()
-      .setTitle('🏆 All-Time Leaderboard')
-      .setDescription(board)
-      .setColor(0xe67e22);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Meme
-  if (interaction.commandName === 'meme') {
-    try {
-      const res = await fetch('https://meme-api.com/gimme');
-      const meme = await res.json();
-      const embed = new EmbedBuilder()
-        .setTitle(meme.title)
-        .setImage(meme.url)
-        .setColor(0x1abc9c)
-        .setFooter({ text: `From r/${meme.subreddit}` });
-      await interaction.reply({ embeds: [embed] });
-    } catch (e) {
-      const embed = new EmbedBuilder()
-        .setTitle('Meme Error')
-        .setDescription('Failed to fetch meme.')
-        .setColor(0xe74c3c);
-      await interaction.reply({ embeds: [embed] });
-    }
-  }
-
-  // Mod commands
-  if (interaction.commandName === 'mod') {
-    // Permission check: must have Administrator or be user 843061674378002453
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use moderation commands.', ephemeral: true });
-      return;
-    }
-    const sub = interaction.options.getSubcommand();
-    if (sub === 'ban') {
-      const user = interaction.options.getUser('user');
-      const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+      // Remove from MongoDB
       try {
-        await target.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${interaction.user.tag}`);
-        await interaction.reply({ content: `⏳ Timed out ${user.tag} for 7 days.` });
+        await Persona.deleteOne({ userId: userId });
       } catch (e) {
-        await interaction.reply({ content: `Failed to timeout: ${e.message}`, ephemeral: true });
+        console.error('Error removing persona from MongoDB:', e);
       }
-    } else if (sub === 'timeout') {
-      const user = interaction.options.getUser('user');
-      const duration = interaction.options.getInteger('duration');
-      const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
-      if (!duration || duration < 1 || duration > 10080) return await interaction.reply({ content: 'Duration must be between 1 and 10080 minutes (max 7 days).', ephemeral: true });
-      try {
-        await target.timeout(duration * 60 * 1000, `Timed out by ${interaction.user.tag}`);
-        await interaction.reply({ content: `⏳ Timed out ${user.tag} for ${duration} minutes.` });
-      } catch (e) {
-        await interaction.reply({ content: `Failed to timeout: ${e.message}`, ephemeral: true });
-      }
-    } else if (sub === 'kick') {
-      const user = interaction.options.getUser('user');
-      const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
-      try {
-        await target.kick(`Kicked by ${interaction.user.tag}`);
-        await interaction.reply({ content: `👢 Kicked ${user.tag}` });
-      } catch (e) {
-        await interaction.reply({ content: `Failed to kick: ${e.message}`, ephemeral: true });
-      }
-    } else if (sub === 'mute') {
-      const user = interaction.options.getUser('user');
-      const duration = interaction.options.getInteger('duration');
-      const target = interaction.guild.members.cache.get(user.id);
-      if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
-      try {
-        let muteRole = interaction.guild.roles.cache.find(r => r.name === 'Muted');
-        if (!muteRole) {
-          muteRole = await interaction.guild.roles.create({ name: 'Muted', color: 'GREY', reason: 'Mute role for bot' });
-          for (const channel of interaction.guild.channels.cache.values()) {
-            await channel.permissionOverwrites.edit(muteRole, { SendMessages: false, Speak: false });
-          }
-        }
-        await target.roles.add(muteRole);
-        await interaction.reply({ content: `🔇 Muted ${user.tag} for ${duration} minutes.` });
-        setTimeout(async () => {
-          if (target.roles.cache.has(muteRole.id)) {
-            await target.roles.remove(muteRole);
-          }
-        }, duration * 60000);
-      } catch (e) {
-        await interaction.reply({ content: `Failed to mute: ${e.message}`, ephemeral: true });
-      }
-    } else if (sub === 'purge') {
-      const amount = interaction.options.getInteger('amount');
-      if (!amount || amount < 1 || amount > 100) return await interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
-      try {
-        const channel = interaction.channel;
-        const messages = await channel.bulkDelete(amount, true);
-        await interaction.reply({ content: `🧹 Deleted ${messages.size} messages.` });
-      } catch (e) {
-        await interaction.reply({ content: `Failed to delete messages: ${e.message}`, ephemeral: true });
-      }
-    }
-  }
 
-  // Ping
-  if (interaction.commandName === 'ping') {
-    const embed = new EmbedBuilder()
-      .setTitle('🏓 Pong!')
-      .setDescription(`Latency: ${client.ws.ping}ms`)
-      .setColor(0x9b59b6);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Reactionrole
-  if (interaction.commandName === 'reactionrole') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: 'You do not have permission to use reaction role commands.', ephemeral: true });
-      return;
-    }
-    const sub = interaction.options.getSubcommand();
-    if (sub === 'add') {
-      // Setup a reaction role (simple version)
-      await interaction.reply({ content: 'Send a message and react to it with an emoji. Then use this command again to link the role.' });
-    } else if (sub === 'remove') {
-      await interaction.reply({ content: 'Reaction role removal feature is not implemented yet.' });
-    }
-  }
-
-  // Role
-  if (interaction.commandName === 'role') {
-    // Permission check: must have Administrator, be owner, or have Starfire perms
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to use role management commands.', ephemeral: true });
+      await interaction.reply({ content: `Reset persona for <@${userId}>. They will now receive the default behavior.`, ephemeral: true });
       return;
     }
 
-    const sub = interaction.options.getSubcommand();
-    const user = interaction.options.getUser('user');
-    const role = interaction.options.getRole('role');
-    const targetMember = interaction.guild.members.cache.get(user.id);
-    if (!targetMember || !role) return await interaction.reply({ content: 'User or role not found.', ephemeral: true });
-    if (sub === 'add') {
-      try {
-        await targetMember.roles.add(role);
-        await interaction.reply({ content: `Added role ${role.name} to ${user.tag}` });
-      } catch (e) {
-        await interaction.reply({ content: `Failed to add role: ${e.message}`, ephemeral: true });
+    // /spadecult: Assign Spade Cult role to user
+    if (interaction.commandName === 'spadecult') {
+      const roleId = '1391511769842974870';
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const role = interaction.guild.roles.cache.get(roleId);
+      if (!role) {
+        await interaction.reply({ content: 'Spade Cult role not found in this server.', ephemeral: true });
+        return;
       }
-    } else if (sub === 'remove') {
-      try {
-        await targetMember.roles.remove(role);
-        await interaction.reply({ content: `Removed role ${role.name} from ${user.tag}` });
-      } catch (e) {
-        await interaction.reply({ content: `Failed to remove role: ${e.message}`, ephemeral: true });
+      if (member.roles.cache.has(roleId)) {
+        await interaction.reply({ content: 'You already have the Spade Cult role!', ephemeral: true });
+        return;
       }
-    }
-  }
-
-  // Serverinfo
-  if (interaction.commandName === 'serverinfo') {
-    const embed = new EmbedBuilder()
-      .setTitle('Server Info')
-      .addFields(
-        { name: 'Server Name', value: interaction.guild.name, inline: true },
-        { name: 'Total Members', value: `${interaction.guild.memberCount}`, inline: true }
-      )
-      .setColor(0x34495e);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Uptime
-  if (interaction.commandName === 'uptime') {
-    const uptime = Math.floor(process.uptime() / 60);
-    const embed = new EmbedBuilder()
-      .setTitle('⏱️ Uptime')
-      .setDescription(`Bot uptime: ${uptime} minutes.`)
-      .setColor(0x27ae60);
-    await interaction.reply({ embeds: [embed] });
-  }
-  if (interaction.commandName === 'userinfo') {
-    const user = interaction.options.getUser('user') || interaction.user;
-    const embed = new EmbedBuilder()
-      .setTitle('User Info')
-      .addFields(
-        { name: 'Username', value: user.tag, inline: true },
-        { name: 'User ID', value: user.id, inline: true }
-      )
-      .setThumbnail(user.displayAvatarURL())
-      .setColor(0x2980b9);
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Snipe command
-  if (interaction.commandName === 'snipe') {
-    if (!interaction.channel) {
-      await interaction.reply({ content: 'This command can only be used in a server channel.', ephemeral: true });
+      try {
+        await member.roles.add(role);
+        await interaction.reply({ content: 'You have joined the Spade Cult! ♠️', ephemeral: false });
+      } catch (e) {
+        await interaction.reply({ content: `Failed to assign role: ${e.message}`, ephemeral: true });
+      }
       return;
     }
-
-    const index = interaction.options.getInteger('index') || 1;
-    console.log(`🎯 Snipe command used in channel ${interaction.channel.id} with index ${index}`);
-
-    const deletedMessagesArray = deletedMessages.get(interaction.channel.id) || [];
-    console.log(`📋 Found ${deletedMessagesArray.length} deleted messages`);
-
-    if (deletedMessagesArray.length === 0) {
-      const embed = new EmbedBuilder()
-        .setTitle('🎯 Message Snipe')
-        .setDescription('No recently deleted messages found in this channel.')
-        .setColor(0xe74c3c);
-      await interaction.reply({ embeds: [embed] });
-      return;
-    }
-
-    if (index < 1 || index > deletedMessagesArray.length) {
-      const embed = new EmbedBuilder()
-        .setTitle('🎯 Message Snipe')
-        .setDescription(`Invalid index! Please use a number between 1 and ${deletedMessagesArray.length}.`)
-        .setColor(0xe74c3c);
-      await interaction.reply({ embeds: [embed] });
-      return;
-    }
-
-    // Get the message at the specified index (1-based, so subtract 1 for 0-based array)
-    const deletedMessage = deletedMessagesArray[index - 1];
-    console.log(`📝 Sniping message ${index}: "${deletedMessage.content?.slice(0, 50)}..." by ${deletedMessage.author?.tag}`);
-
-    const embed = new EmbedBuilder()
-      .setTitle(`🎯 Sniped Message #${index}`)
-      .setDescription(deletedMessage.content || '*No content*')
-      .setAuthor({
-        name: deletedMessage.author.tag,
-        iconURL: deletedMessage.author.avatarURL
-      })
-      .setTimestamp(deletedMessage.timestamp)
-      .setColor(0xf39c12)
-      .setFooter({ text: `User ID: ${deletedMessage.author.id} | ${index}/${deletedMessagesArray.length} messages` });
-
-    // Add attachment info if any
-    if (deletedMessage.attachments.length > 0) {
-      const attachmentList = deletedMessage.attachments
-        .map(att => `📎 ${att.name} (${(att.size / 1024).toFixed(1)}KB)`)
+    // /commands: List all supported commands
+    if (interaction.commandName === 'commands') {
+      const commandList = commands
+        .filter(cmd => cmd.name !== 'commands' && cmd.name !== 'huzz')
+        .map(cmd => `•  /${cmd.name} - ${cmd.description}`)
         .join('\n');
-      embed.addFields({ name: 'Attachments', value: attachmentList });
-    }
-
-    await interaction.reply({ embeds: [embed] });
-  }
-
-  // Timer command
-  if (interaction.commandName === 'timer') {
-    const targetUser = interaction.options.getUser('user');
-    const targetMember = interaction.guild.members.cache.get(targetUser.id);
-
-    if (!targetMember) {
-      await interaction.reply({ content: 'User not found in this server.', ephemeral: true });
+      const embed = new EmbedBuilder()
+        .setTitle('Supported Commands')
+        .setDescription(commandList)
+        .setColor(0x8e44ad);
+      await interaction.reply({ embeds: [embed] });
       return;
     }
+    // Set AI channel
+    if (interaction.commandName === 'setaichannel') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to set AI channels.', ephemeral: true });
+        return;
+      }
+      const channel = interaction.options.getChannel('channel');
+      if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
+        return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
+      }
 
-    // Check if there's already an active timer in this channel
-    if (activeTimers.has(interaction.channel.id)) {
-      await interaction.reply({ content: 'There is already an active timer in this channel!', ephemeral: true });
+      // Defer the reply to prevent timeout
+      await interaction.deferReply();
+
+      try {
+        const added = await addGuildAIChannel(interaction.guild.id, channel.id);
+        if (added) {
+          const currentChannels = await getGuildAIChannels(interaction.guild.id);
+          await interaction.editReply({
+            content: `✅ Added <#${channel.id}> as an AI channel! Starfire will now respond in ${currentChannels.size} channel(s) for this server.`
+          });
+        } else {
+          await interaction.editReply({ content: `<#${channel.id}> is already set as an AI channel for this server.` });
+        }
+      } catch (error) {
+        console.error('Error setting AI channel:', error);
+        await interaction.editReply({ content: 'There was an error setting the AI channel. Please try again.' });
+      }
+    }
+    // Remove AI channel
+    if (interaction.commandName === 'removeaichannel') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to remove AI channels.', ephemeral: true });
+        return;
+      }
+
+      const channel = interaction.options.getChannel('channel');
+      if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
+        return await interaction.reply({ content: 'Please select a text channel to remove.', ephemeral: true });
+      }
+
+      // Defer the reply to prevent timeout
+      await interaction.deferReply();
+
+      try {
+        const removed = await removeGuildAIChannel(interaction.guild.id, channel.id);
+        if (removed) {
+          const remainingChannels = await getGuildAIChannels(interaction.guild.id);
+          if (remainingChannels.size > 0) {
+            await interaction.editReply({
+              content: `✅ Removed <#${channel.id}> from AI channels. Starfire will still respond in ${remainingChannels.size} other channel(s).`
+            });
+          } else {
+            await interaction.editReply({
+              content: `✅ Removed <#${channel.id}> from AI channels. Starfire will no longer automatically respond to messages in this server.`
+            });
+          }
+        } else {
+          await interaction.editReply({ content: `<#${channel.id}> was not set as an AI channel for this server.` });
+        }
+      } catch (error) {
+        console.error('Error removing AI channel:', error);
+        await interaction.editReply({ content: 'There was an error removing the AI channel. Please try again.' });
+      }
+    }
+    // AI Channel Info
+    if (interaction.commandName === 'aichannelinfo') {
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        const guildAIChannels = await getGuildAIChannels(interaction.guild.id);
+        if (guildAIChannels.size > 0) {
+          const channelList = Array.from(guildAIChannels).map(channelId => `<#${channelId}>`).join(', ');
+          await interaction.editReply({
+            content: `**AI Channels for this server (${guildAIChannels.size}):**\n${channelList}\n\nStarfire will respond to messages in these channels.`
+          });
+        } else {
+          await interaction.editReply({ content: 'No AI channels are set for this server. Use `/setaichannel` to add channels.' });
+        }
+      } catch (error) {
+        console.error('Error getting AI channel info:', error);
+        await interaction.editReply({ content: 'There was an error getting AI channel information. Please try again.' });
+      }
+    }
+    // List all AI channels command (Admin only)
+    if (interaction.commandName === 'listallai') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You must be an administrator or xcho_ to use this command.', ephemeral: true });
+        return;
+      }
+
+      // Defer the reply since this might take time with multiple guild lookups
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        const allChannels = Array.from(memory.aiChannels.entries());
+        if (allChannels.length === 0) {
+          await interaction.editReply({ content: 'No AI channels are currently set across any servers.' });
+          return;
+        }
+
+        let channelList = '**🤖 AI Channels Across All Servers:**\n\n';
+        for (const [guildId, channelId] of allChannels) {
+          try {
+            const guild = client.guilds.cache.get(guildId);
+            const channel = guild ? guild.channels.cache.get(channelId) : null;
+
+            if (guild && channel) {
+              channelList += `• **${guild.name}**: <#${channelId}> (${channel.name})\n`;
+            } else {
+              channelList += `• **Unknown Guild** (${guildId}): Channel ${channelId} (may be deleted)\n`;
+            }
+          } catch (error) {
+            channelList += `• **Error loading guild** (${guildId}): Channel ${channelId}\n`;
+          }
+        }
+
+        channelList += `\n📊 **Total AI Channels**: ${allChannels.length}`;
+
+        const embed = new EmbedBuilder()
+          .setTitle('🌐 Global AI Channel Status')
+          .setDescription(channelList)
+          .setColor(0x3498db)
+          .setFooter({ text: 'Use /setaichannel to add more channels' });
+
+        await interaction.editReply({ embeds: [embed] });
+      } catch (error) {
+        console.error('Error in listallai command:', error);
+        await interaction.editReply({ content: 'There was an error listing AI channels. Please try again.' });
+      }
+    }
+    // Status command
+    if (interaction.commandName === 'status') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You do not have permission to change the bot status.', ephemeral: true });
+        return;
+      }
+      const text = interaction.options.getString('text');
+      try {
+        await client.user.setActivity(text, { type: 0 }); // 0 = Playing
+        const embed = new EmbedBuilder()
+          .setTitle('Bot Status Updated')
+          .setDescription(`Playing: ${text}`)
+          .setColor(0x16a085);
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+      } catch (e) {
+        const embed = new EmbedBuilder()
+          .setTitle('Status Error')
+          .setDescription(`Error updating status: ${e.message || e}`)
+          .setColor(0xe74c3c);
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+      }
       return;
     }
+    // Supporters channel command
+    if (interaction.commandName === 'supporterschannel') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to set the supporters channel.', ephemeral: true });
+        return;
+      }
+      const channel = interaction.options.getChannel('channel');
+      if (!channel || channel.type !== 0) { // type 0 = GUILD_TEXT
+        return await interaction.reply({ content: 'Please select a text channel.', ephemeral: true });
+      }
+      console.log(`Setting up supporters channel: ${channel.name} (${channel.id})`);
+      memory.supportersChannelId = channel.id;
 
-    // Clear any previous ended timer in this channel
-    endedTimers.delete(interaction.channel.id);
+      // Save to MongoDB
+      await setSetting('supportersChannelId', channel.id);
 
-    // Check if user has special roles
-    const supporterRoleId = '1363903344514564397';
-    const boosterRoleId = '1363559989909782548';
-    const hasSupporterRole = targetMember.roles.cache.has(supporterRoleId);
-    const hasBoosterRole = targetMember.roles.cache.has(boosterRoleId);
+      // Check existing members for starlit in their status and assign role
+      const supporterRoleId = '1363903344514564397';
+      const supporterRole = interaction.guild.roles.cache.get(supporterRoleId);
+      if (!supporterRole) {
+        console.log(`ERROR: Supporter role ${supporterRoleId} not found in server`);
+        return await interaction.reply({ content: 'Supporter role not found in this server.', ephemeral: true });
+      }
 
-    // Set timer duration: 25 seconds for booster role, 20 seconds for supporter role, 15 seconds for everyone else
-    let timerDuration, timerDurationSeconds, roleBonus = '';
-    if (hasBoosterRole) {
-      timerDuration = 25000; // 25 seconds
-      timerDurationSeconds = 25;
-      roleBonus = ' (booster role bonus!)';
-    } else if (hasSupporterRole) {
-      timerDuration = 20000; // 20 seconds
-      timerDurationSeconds = 20;
-      roleBonus = ' (supporter role bonus!)';
-    } else {
-      timerDuration = 15000; // 15 seconds
-      timerDurationSeconds = 15;
-    }
+      console.log(`Found supporter role: ${supporterRole.name}`);
+      let assignedCount = 0;
 
-    const startTime = Date.now();
+      // Only fetch online members with presence data (much faster!)
+      const onlineMembers = new Map();
+      interaction.guild.presences.cache.forEach((presence, userId) => {
+        if (presence.status !== 'offline') {
+          const member = interaction.guild.members.cache.get(userId);
+          if (member) {
+            onlineMembers.set(userId, member);
+          }
+        }
+      });
 
-    // Create timeout for the timer
-    const timeout = setTimeout(async () => {
-      // Move to ended timers when timeout occurs naturally
-      const timerData = activeTimers.get(interaction.channel.id);
-      if (timerData) {
-        endedTimers.set(interaction.channel.id, {
-          userId: timerData.userId,
-          startTime: timerData.startTime,
-          duration: timerData.duration
+      console.log(`Found ${onlineMembers.size} online members to check for starlit status (instead of ${interaction.guild.memberCount} total)`);
+
+      for (const [userId, member] of onlineMembers) {
+        const presence = member.presence;
+        console.log(`Checking online member: ${member.user.tag} (${userId})`);
+
+        if (!presence.activities || presence.activities.length === 0) {
+          console.log(`  - No activities for ${member.user.tag}`);
+          continue;
+        }
+
+        console.log(`  - ${member.user.tag} has ${presence.activities.length} activities`);
+
+        const hasStarlit = presence.activities.some(activity => {
+          console.log(`    - Activity type: ${activity.type}, name: ${activity.name}, state: ${activity.state}`);
+
+          if (activity.type === 4) { // Custom status
+            if (activity.state) {
+              const hasMatch = activity.state.toLowerCase().includes('starlit');
+              console.log(`    - Custom status: "${activity.state}" - Contains starlit: ${hasMatch}`);
+              return hasMatch;
+            } else {
+              console.log(`    - Custom status with no state text`);
+            }
+          }
+          return false;
         });
+
+        console.log(`  - ${member.user.tag} has starlit in status: ${hasStarlit}`);
+
+        if (hasStarlit && !member.roles.cache.has(supporterRoleId)) {
+          console.log(`  - Assigning supporter role to ${member.user.tag}`);
+          try {
+            await member.roles.add(supporterRole);
+            assignedCount++;
+
+            // Send announcement
+            const announceChannel = interaction.guild.channels.cache.get(memory.supportersChannelId);
+            if (announceChannel) {
+              await announceChannel.send({
+                content: `Thank you for supporting Starlit <@${userId}>! Here's your role! 🌟`
+              });
+              console.log(`  - Sent announcement for ${member.user.tag}`);
+            }
+          } catch (e) {
+            console.error(`  - Failed to assign supporter role to ${member.user.tag}:`, e);
+          }
+        } else if (hasStarlit && member.roles.cache.has(supporterRoleId)) {
+          console.log(`  - ${member.user.tag} already has supporter role (no announcement needed)`);
+        }
       }
-      activeTimers.delete(interaction.channel.id);
-      await interaction.followUp({ content: `⏰ Time's up for <@${targetUser.id}>!` });
-    }, timerDuration);
 
-    // Store the active timer
-    activeTimers.set(interaction.channel.id, {
-      userId: targetUser.id,
-      startTime: startTime,
-      duration: timerDuration,
-      timeout: timeout
-    });
-
-    await interaction.reply({
-      content: `⏱️ Timer started for <@${targetUser.id}>! Duration: ${timerDurationSeconds} seconds${roleBonus}`
-    });
-  }
-
-  // Voice commands
-  if (interaction.commandName === 'vcjoin') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+      await interaction.reply({
+        content: `Supporters channel set to <#${memory.supportersChannelId}>. Assigned supporter role to ${assignedCount} existing members with starlit in their status.`
+      });
       return;
     }
+    if (interaction.type !== InteractionType.ApplicationCommand) return;
 
-    const targetChannel = interaction.options.getChannel('channel');
-    let voiceChannel;
-
-    if (targetChannel) {
-      // Use specified channel
-      if (targetChannel.type !== 2) { // GUILD_VOICE = 2
-        await interaction.reply({ content: 'Please specify a voice channel.', ephemeral: true });
-        return;
-      }
-      voiceChannel = targetChannel;
-    } else {
-      // Try to join user's current voice channel
-      const userMember = interaction.guild.members.cache.get(interaction.user.id);
-      if (!userMember.voice.channel) {
-        await interaction.reply({ content: 'You must be in a voice channel or specify one to join.', ephemeral: true });
-        return;
-      }
-      voiceChannel = userMember.voice.channel;
+    // 8ball
+    if (interaction.commandName === '8ball') {
+      const responses = ['Yes.', 'No.', 'Maybe.', 'Definitely!', 'Ask again later.', 'I don\'t know.', 'Absolutely!', 'Not a chance.'];
+      const answer = responses[Math.floor(Math.random() * responses.length)];
+      const embed = new EmbedBuilder()
+        .setTitle('🎱 Magic 8-Ball')
+        .setDescription(answer)
+        .setColor(0x3498db);
+      await interaction.reply({ embeds: [embed] });
     }
 
-    try {
-      // Check if already connected to this guild
-      const existingConnection = memory.voiceConnections.get(interaction.guild.id);
-      if (existingConnection) {
-        await interaction.reply({ content: `Already connected to <#${existingConnection.channelId}>. Use /vcleave first.`, ephemeral: true });
+    // Coinflip
+    if (interaction.commandName === 'coinflip') {
+      const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
+      const embed = new EmbedBuilder()
+        .setTitle('🪙 Coin Flip')
+        .setDescription(result)
+        .setColor(0xf39c12);
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Dailyboard
+    if (interaction.commandName === 'dailyboard') {
+      if (!global.dailyMessages) global.dailyMessages = {};
+      const today = new Date().toISOString().slice(0, 10);
+      const board = Object.entries(global.dailyMessages[today] || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
+        .join('\n') || 'No messages today.';
+      const embed = new EmbedBuilder()
+        .setTitle('📅 Today\'s Leaderboard')
+        .setDescription(board)
+        .setColor(0x2ecc71);
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Leaderboard
+    if (interaction.commandName === 'leaderboard') {
+      if (!global.allTimeMessages) global.allTimeMessages = {};
+      const board = Object.entries(global.allTimeMessages)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([id, count], i) => `${i + 1}. <@${id}>: ${count}`)
+        .join('\n') || 'No messages yet.';
+      const embed = new EmbedBuilder()
+        .setTitle('🏆 All-Time Leaderboard')
+        .setDescription(board)
+        .setColor(0xe67e22);
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Meme
+    if (interaction.commandName === 'meme') {
+      try {
+        const res = await fetch('https://meme-api.com/gimme');
+        const meme = await res.json();
+        const embed = new EmbedBuilder()
+          .setTitle(meme.title)
+          .setImage(meme.url)
+          .setColor(0x1abc9c)
+          .setFooter({ text: `From r/${meme.subreddit}` });
+        await interaction.reply({ embeds: [embed] });
+      } catch (e) {
+        const embed = new EmbedBuilder()
+          .setTitle('Meme Error')
+          .setDescription('Failed to fetch meme.')
+          .setColor(0xe74c3c);
+        await interaction.reply({ embeds: [embed] });
+      }
+    }
+
+    // Mod commands
+    if (interaction.commandName === 'mod') {
+      // Permission check: must have Administrator or be user 843061674378002453
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You do not have permission to use moderation commands.', ephemeral: true });
+        return;
+      }
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'ban') {
+        const user = interaction.options.getUser('user');
+        const target = interaction.guild.members.cache.get(user.id);
+        if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+        try {
+          await target.timeout(10080 * 60 * 1000, `Timed out for 7 days by ${interaction.user.tag}`);
+          await interaction.reply({ content: `⏳ Timed out ${user.tag} for 7 days.` });
+        } catch (e) {
+          await interaction.reply({ content: `Failed to timeout: ${e.message}`, ephemeral: true });
+        }
+      } else if (sub === 'timeout') {
+        const user = interaction.options.getUser('user');
+        const duration = interaction.options.getInteger('duration');
+        const target = interaction.guild.members.cache.get(user.id);
+        if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+        if (!duration || duration < 1 || duration > 10080) return await interaction.reply({ content: 'Duration must be between 1 and 10080 minutes (max 7 days).', ephemeral: true });
+        try {
+          await target.timeout(duration * 60 * 1000, `Timed out by ${interaction.user.tag}`);
+          await interaction.reply({ content: `⏳ Timed out ${user.tag} for ${duration} minutes.` });
+        } catch (e) {
+          await interaction.reply({ content: `Failed to timeout: ${e.message}`, ephemeral: true });
+        }
+      } else if (sub === 'kick') {
+        const user = interaction.options.getUser('user');
+        const target = interaction.guild.members.cache.get(user.id);
+        if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+        try {
+          await target.kick(`Kicked by ${interaction.user.tag}`);
+          await interaction.reply({ content: `👢 Kicked ${user.tag}` });
+        } catch (e) {
+          await interaction.reply({ content: `Failed to kick: ${e.message}`, ephemeral: true });
+        }
+      } else if (sub === 'mute') {
+        const user = interaction.options.getUser('user');
+        const duration = interaction.options.getInteger('duration');
+        const target = interaction.guild.members.cache.get(user.id);
+        if (!target) return await interaction.reply({ content: 'User not found.', ephemeral: true });
+        try {
+          let muteRole = interaction.guild.roles.cache.find(r => r.name === 'Muted');
+          if (!muteRole) {
+            muteRole = await interaction.guild.roles.create({ name: 'Muted', color: 'GREY', reason: 'Mute role for bot' });
+            for (const channel of interaction.guild.channels.cache.values()) {
+              await channel.permissionOverwrites.edit(muteRole, { SendMessages: false, Speak: false });
+            }
+          }
+          await target.roles.add(muteRole);
+          await interaction.reply({ content: `🔇 Muted ${user.tag} for ${duration} minutes.` });
+          setTimeout(async () => {
+            if (target.roles.cache.has(muteRole.id)) {
+              await target.roles.remove(muteRole);
+            }
+          }, duration * 60000);
+        } catch (e) {
+          await interaction.reply({ content: `Failed to mute: ${e.message}`, ephemeral: true });
+        }
+      } else if (sub === 'purge') {
+        const amount = interaction.options.getInteger('amount');
+        if (!amount || amount < 1 || amount > 100) return await interaction.reply({ content: 'Amount must be between 1 and 100.', ephemeral: true });
+        try {
+          const channel = interaction.channel;
+          const messages = await channel.bulkDelete(amount, true);
+          await interaction.reply({ content: `🧹 Deleted ${messages.size} messages.` });
+        } catch (e) {
+          await interaction.reply({ content: `Failed to delete messages: ${e.message}`, ephemeral: true });
+        }
+      }
+    }
+
+    // Ping
+    if (interaction.commandName === 'ping') {
+      const embed = new EmbedBuilder()
+        .setTitle('🏓 Pong!')
+        .setDescription(`Latency: ${client.ws.ping}ms`)
+        .setColor(0x9b59b6);
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Reactionrole
+    if (interaction.commandName === 'reactionrole') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You do not have permission to use reaction role commands.', ephemeral: true });
+        return;
+      }
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'add') {
+        // Setup a reaction role (simple version)
+        await interaction.reply({ content: 'Send a message and react to it with an emoji. Then use this command again to link the role.' });
+      } else if (sub === 'remove') {
+        await interaction.reply({ content: 'Reaction role removal feature is not implemented yet.' });
+      }
+    }
+
+    // Role
+    if (interaction.commandName === 'role') {
+      // Permission check: must have Administrator, be owner, or have Starfire perms
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to use role management commands.', ephemeral: true });
         return;
       }
 
-      const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: interaction.guild.id,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
+      const sub = interaction.options.getSubcommand();
+      const user = interaction.options.getUser('user');
+      const role = interaction.options.getRole('role');
+      const targetMember = interaction.guild.members.cache.get(user.id);
+      if (!targetMember || !role) return await interaction.reply({ content: 'User or role not found.', ephemeral: true });
+      if (sub === 'add') {
+        try {
+          await targetMember.roles.add(role);
+          await interaction.reply({ content: `Added role ${role.name} to ${user.tag}` });
+        } catch (e) {
+          await interaction.reply({ content: `Failed to add role: ${e.message}`, ephemeral: true });
+        }
+      } else if (sub === 'remove') {
+        try {
+          await targetMember.roles.remove(role);
+          await interaction.reply({ content: `Removed role ${role.name} from ${user.tag}` });
+        } catch (e) {
+          await interaction.reply({ content: `Failed to remove role: ${e.message}`, ephemeral: true });
+        }
+      }
+    }
+
+    // Serverinfo
+    if (interaction.commandName === 'serverinfo') {
+      const embed = new EmbedBuilder()
+        .setTitle('Server Info')
+        .addFields(
+          { name: 'Server Name', value: interaction.guild.name, inline: true },
+          { name: 'Total Members', value: `${interaction.guild.memberCount}`, inline: true }
+        )
+        .setColor(0x34495e);
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Uptime
+    if (interaction.commandName === 'uptime') {
+      const uptime = Math.floor(process.uptime() / 60);
+      const embed = new EmbedBuilder()
+        .setTitle('⏱️ Uptime')
+        .setDescription(`Bot uptime: ${uptime} minutes.`)
+        .setColor(0x27ae60);
+      await interaction.reply({ embeds: [embed] });
+    }
+    if (interaction.commandName === 'userinfo') {
+      const user = interaction.options.getUser('user') || interaction.user;
+      const embed = new EmbedBuilder()
+        .setTitle('User Info')
+        .addFields(
+          { name: 'Username', value: user.tag, inline: true },
+          { name: 'User ID', value: user.id, inline: true }
+        )
+        .setThumbnail(user.displayAvatarURL())
+        .setColor(0x2980b9);
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Snipe command
+    if (interaction.commandName === 'snipe') {
+      if (!interaction.channel) {
+        await interaction.reply({ content: 'This command can only be used in a server channel.', ephemeral: true });
+        return;
+      }
+
+      const index = interaction.options.getInteger('index') || 1;
+      console.log(`🎯 Snipe command used in channel ${interaction.channel.id} with index ${index}`);
+
+      const deletedMessagesArray = deletedMessages.get(interaction.channel.id) || [];
+      console.log(`📋 Found ${deletedMessagesArray.length} deleted messages`);
+
+      if (deletedMessagesArray.length === 0) {
+        const embed = new EmbedBuilder()
+          .setTitle('🎯 Message Snipe')
+          .setDescription('No recently deleted messages found in this channel.')
+          .setColor(0xe74c3c);
+        await interaction.reply({ embeds: [embed] });
+        return;
+      }
+
+      if (index < 1 || index > deletedMessagesArray.length) {
+        const embed = new EmbedBuilder()
+          .setTitle('🎯 Message Snipe')
+          .setDescription(`Invalid index! Please use a number between 1 and ${deletedMessagesArray.length}.`)
+          .setColor(0xe74c3c);
+        await interaction.reply({ embeds: [embed] });
+        return;
+      }
+
+      // Get the message at the specified index (1-based, so subtract 1 for 0-based array)
+      const deletedMessage = deletedMessagesArray[index - 1];
+      console.log(`📝 Sniping message ${index}: "${deletedMessage.content?.slice(0, 50)}..." by ${deletedMessage.author?.tag}`);
+
+      const embed = new EmbedBuilder()
+        .setTitle(`🎯 Sniped Message #${index}`)
+        .setDescription(deletedMessage.content || '*No content*')
+        .setAuthor({
+          name: deletedMessage.author.tag,
+          iconURL: deletedMessage.author.avatarURL
+        })
+        .setTimestamp(deletedMessage.timestamp)
+        .setColor(0xf39c12)
+        .setFooter({ text: `User ID: ${deletedMessage.author.id} | ${index}/${deletedMessagesArray.length} messages` });
+
+      // Add attachment info if any
+      if (deletedMessage.attachments.length > 0) {
+        const attachmentList = deletedMessage.attachments
+          .map(att => `📎 ${att.name} (${(att.size / 1024).toFixed(1)}KB)`)
+          .join('\n');
+        embed.addFields({ name: 'Attachments', value: attachmentList });
+      }
+
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    // Timer command
+    if (interaction.commandName === 'timer') {
+      const targetUser = interaction.options.getUser('user');
+      const targetMember = interaction.guild.members.cache.get(targetUser.id);
+
+      if (!targetMember) {
+        await interaction.reply({ content: 'User not found in this server.', ephemeral: true });
+        return;
+      }
+
+      // Check if there's already an active timer in this channel
+      if (activeTimers.has(interaction.channel.id)) {
+        await interaction.reply({ content: 'There is already an active timer in this channel!', ephemeral: true });
+        return;
+      }
+
+      // Clear any previous ended timer in this channel
+      endedTimers.delete(interaction.channel.id);
+
+      // Check if user has special roles
+      const supporterRoleId = '1363903344514564397';
+      const boosterRoleId = '1363559989909782548';
+      const hasSupporterRole = targetMember.roles.cache.has(supporterRoleId);
+      const hasBoosterRole = targetMember.roles.cache.has(boosterRoleId);
+
+      // Set timer duration: 25 seconds for booster role, 20 seconds for supporter role, 15 seconds for everyone else
+      let timerDuration, timerDurationSeconds, roleBonus = '';
+      if (hasBoosterRole) {
+        timerDuration = 25000; // 25 seconds
+        timerDurationSeconds = 25;
+        roleBonus = ' (booster role bonus!)';
+      } else if (hasSupporterRole) {
+        timerDuration = 20000; // 20 seconds
+        timerDurationSeconds = 20;
+        roleBonus = ' (supporter role bonus!)';
+      } else {
+        timerDuration = 15000; // 15 seconds
+        timerDurationSeconds = 15;
+      }
+
+      const startTime = Date.now();
+
+      // Create timeout for the timer
+      const timeout = setTimeout(async () => {
+        // Move to ended timers when timeout occurs naturally
+        const timerData = activeTimers.get(interaction.channel.id);
+        if (timerData) {
+          endedTimers.set(interaction.channel.id, {
+            userId: timerData.userId,
+            startTime: timerData.startTime,
+            duration: timerData.duration
+          });
+        }
+        activeTimers.delete(interaction.channel.id);
+        await interaction.followUp({ content: `⏰ Time's up for <@${targetUser.id}>!` });
+      }, timerDuration);
+
+      // Store the active timer
+      activeTimers.set(interaction.channel.id, {
+        userId: targetUser.id,
+        startTime: startTime,
+        duration: timerDuration,
+        timeout: timeout
       });
 
-      const player = createAudioPlayer();
-
-      // Store connection info
-      memory.voiceConnections.set(interaction.guild.id, {
-        connection,
-        player,
-        channelId: voiceChannel.id
+      await interaction.reply({
+        content: `⏱️ Timer started for <@${targetUser.id}>! Duration: ${timerDurationSeconds} seconds${roleBonus}`
       });
+    }
 
-      connection.subscribe(player);
+    // Voice commands
+    if (interaction.commandName === 'vcjoin') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
 
-      // Handle connection events
-      connection.on(VoiceConnectionStatus.Ready, () => {
-        console.log(`🎤 Connected to voice channel: ${voiceChannel.name}`);
-      });
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+        return;
+      }
 
-      connection.on(VoiceConnectionStatus.Disconnected, () => {
-        console.log(`🔇 Disconnected from voice channel: ${voiceChannel.name}`);
+      const targetChannel = interaction.options.getChannel('channel');
+      let voiceChannel;
+
+      if (targetChannel) {
+        // Use specified channel
+        if (targetChannel.type !== 2) { // GUILD_VOICE = 2
+          await interaction.reply({ content: 'Please specify a voice channel.', ephemeral: true });
+          return;
+        }
+        voiceChannel = targetChannel;
+      } else {
+        // Try to join user's current voice channel
+        const userMember = interaction.guild.members.cache.get(interaction.user.id);
+        if (!userMember.voice.channel) {
+          await interaction.reply({ content: 'You must be in a voice channel or specify one to join.', ephemeral: true });
+          return;
+        }
+        voiceChannel = userMember.voice.channel;
+      }
+
+      try {
+        // Check if already connected to this guild
+        const existingConnection = memory.voiceConnections.get(interaction.guild.id);
+        if (existingConnection) {
+          await interaction.reply({ content: `Already connected to <#${existingConnection.channelId}>. Use /vcleave first.`, ephemeral: true });
+          return;
+        }
+
+        const connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: interaction.guild.id,
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+        });
+
+        const player = createAudioPlayer();
+
+        // Store connection info
+        memory.voiceConnections.set(interaction.guild.id, {
+          connection,
+          player,
+          channelId: voiceChannel.id
+        });
+
+        connection.subscribe(player);
+
+        // Handle connection events
+        connection.on(VoiceConnectionStatus.Ready, () => {
+          console.log(`🎤 Connected to voice channel: ${voiceChannel.name}`);
+        });
+
+        connection.on(VoiceConnectionStatus.Disconnected, () => {
+          console.log(`🔇 Disconnected from voice channel: ${voiceChannel.name}`);
+          memory.voiceConnections.delete(interaction.guild.id);
+        });
+
+        await interaction.reply({ content: `🎤 Joined voice channel: <#${voiceChannel.id}>` });
+
+      } catch (error) {
+        console.error('Voice join error:', error);
+        await interaction.reply({ content: `Failed to join voice channel: ${error.message}`, ephemeral: true });
+      }
+    }
+
+    if (interaction.commandName === 'vcleave') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
+        return;
+      }
+
+      const voiceData = memory.voiceConnections.get(interaction.guild.id);
+      if (!voiceData) {
+        await interaction.reply({ content: 'Not currently connected to any voice channel.', ephemeral: true });
+        return;
+      }
+
+      try {
+        voiceData.connection.destroy();
         memory.voiceConnections.delete(interaction.guild.id);
-      });
-
-      await interaction.reply({ content: `🎤 Joined voice channel: <#${voiceChannel.id}>` });
-
-    } catch (error) {
-      console.error('Voice join error:', error);
-      await interaction.reply({ content: `Failed to join voice channel: ${error.message}`, ephemeral: true });
-    }
-  }
-
-  if (interaction.commandName === 'vcleave') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to use voice commands.', ephemeral: true });
-      return;
+        await interaction.reply({ content: '🔇 Left voice channel.' });
+      } catch (error) {
+        console.error('Voice leave error:', error);
+        await interaction.reply({ content: `Failed to leave voice channel: ${error.message}`, ephemeral: true });
+      }
     }
 
-    const voiceData = memory.voiceConnections.get(interaction.guild.id);
-    if (!voiceData) {
-      await interaction.reply({ content: 'Not currently connected to any voice channel.', ephemeral: true });
-      return;
+    if (interaction.commandName === 'vcsay') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to use voice commands.', flags: 64 });
+        return;
+      }
+
+      const text = interaction.options.getString('text');
+      const voiceData = memory.voiceConnections.get(interaction.guild.id);
+
+      if (!voiceData) {
+        await interaction.reply({ content: 'Not currently connected to any voice channel. Use /vcjoin first.', flags: 64 });
+        return;
+      }
+
+      if (!text || text.trim().length === 0) {
+        await interaction.reply({ content: 'Please provide text to speak.', flags: 64 });
+        return;
+      }
+
+      if (text.length > 500) {
+        await interaction.reply({ content: 'Text is too long. Maximum 500 characters.', flags: 64 });
+        return;
+      }
+
+      await interaction.deferReply({ flags: 64 }); // 64 = ephemeral flag
+
+      try {
+        // Import TTS functions dynamically
+        const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
+
+        // Generate TTS
+        const audioPath = await textToSpeech(text);
+        const resource = createTTSResource(audioPath);
+
+        // Set volume
+        resource.volume.setVolume(0.5);
+
+        // Play audio
+        voiceData.player.play(resource);
+
+        // Clean up file after playing
+        voiceData.player.once(AudioPlayerStatus.Idle, () => {
+          cleanupTTSFile(audioPath);
+        });
+
+        await interaction.editReply({ content: `🗣️ Speaking: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"` });
+
+      } catch (error) {
+        console.error('TTS error:', error);
+        await interaction.editReply({ content: `Failed to generate speech: ${error.message}` });
+      }
     }
 
+    if (interaction.commandName === 'aivcstart') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = starfirePerms.has(interaction.user.id);
+
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to use voice commands.', flags: 64 });
+        return;
+      }
+
+      const voiceData = memory.voiceConnections.get(interaction.guild.id);
+
+      if (!voiceData) {
+        await interaction.reply({ content: 'Bot must be connected to a voice channel first. Use /vcjoin to connect.', flags: 64 });
+        return;
+      }
+
+      // Toggle AI voice listening
+      const currentlyListening = memory.aiVoiceListening.get(interaction.guild.id) || false;
+
+      if (currentlyListening) {
+        memory.aiVoiceListening.set(interaction.guild.id, false);
+        await interaction.reply({ content: '🤖 AI voice listening disabled. I will no longer respond to "Starfire hey" messages.', flags: 64 });
+      } else {
+        memory.aiVoiceListening.set(interaction.guild.id, true);
+        await interaction.reply({ content: '🤖 AI voice listening enabled! Say "Starfire hey [your message]" and I will respond with AI-generated voice!', flags: 64 });
+      }
+    }
+  } catch (error) {
+    console.error('Error in interaction handler:', error);
+
+    // Try to respond if we haven't already
     try {
-      voiceData.connection.destroy();
-      memory.voiceConnections.delete(interaction.guild.id);
-      await interaction.reply({ content: '🔇 Left voice channel.' });
-    } catch (error) {
-      console.error('Voice leave error:', error);
-      await interaction.reply({ content: `Failed to leave voice channel: ${error.message}`, ephemeral: true });
-    }
-  }
-
-  if (interaction.commandName === 'vcsay') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to use voice commands.', flags: 64 });
-      return;
-    }
-
-    const text = interaction.options.getString('text');
-    const voiceData = memory.voiceConnections.get(interaction.guild.id);
-
-    if (!voiceData) {
-      await interaction.reply({ content: 'Not currently connected to any voice channel. Use /vcjoin first.', flags: 64 });
-      return;
-    }
-
-    if (!text || text.trim().length === 0) {
-      await interaction.reply({ content: 'Please provide text to speak.', flags: 64 });
-      return;
-    }
-
-    if (text.length > 500) {
-      await interaction.reply({ content: 'Text is too long. Maximum 500 characters.', flags: 64 });
-      return;
-    }
-
-    await interaction.deferReply({ flags: 64 }); // 64 = ephemeral flag
-
-    try {
-      // Import TTS functions dynamically
-      const { textToSpeech, createTTSResource, cleanupTTSFile } = await import('./utils/tts.js');
-
-      // Generate TTS
-      const audioPath = await textToSpeech(text);
-      const resource = createTTSResource(audioPath);
-
-      // Set volume
-      resource.volume.setVolume(0.5);
-
-      // Play audio
-      voiceData.player.play(resource);
-
-      // Clean up file after playing
-      voiceData.player.once(AudioPlayerStatus.Idle, () => {
-        cleanupTTSFile(audioPath);
-      });
-
-      await interaction.editReply({ content: `🗣️ Speaking: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"` });
-
-    } catch (error) {
-      console.error('TTS error:', error);
-      await interaction.editReply({ content: `Failed to generate speech: ${error.message}` });
-    }
-  }
-
-  if (interaction.commandName === 'aivcstart') {
-    const member = interaction.guild.members.cache.get(interaction.user.id);
-    const isAdmin = member && member.permissions.has('Administrator');
-    const isOwner = interaction.user.id === '843061674378002453';
-    const isPerm = starfirePerms.has(interaction.user.id);
-
-    if (!isAdmin && !isOwner && !isPerm) {
-      await interaction.reply({ content: 'You do not have permission to use voice commands.', flags: 64 });
-      return;
-    }
-
-    const voiceData = memory.voiceConnections.get(interaction.guild.id);
-
-    if (!voiceData) {
-      await interaction.reply({ content: 'Bot must be connected to a voice channel first. Use /vcjoin to connect.', flags: 64 });
-      return;
-    }
-
-    // Toggle AI voice listening
-    const currentlyListening = memory.aiVoiceListening.get(interaction.guild.id) || false;
-
-    if (currentlyListening) {
-      memory.aiVoiceListening.set(interaction.guild.id, false);
-      await interaction.reply({ content: '🤖 AI voice listening disabled. I will no longer respond to "Starfire hey" messages.', flags: 64 });
-    } else {
-      memory.aiVoiceListening.set(interaction.guild.id, true);
-      await interaction.reply({ content: '🤖 AI voice listening enabled! Say "Starfire hey [your message]" and I will respond with AI-generated voice!', flags: 64 });
+      if (interaction.isCommand() && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'An error occurred while processing your command. Please try again.', ephemeral: true });
+      } else if (interaction.deferred && !interaction.replied) {
+        await interaction.editReply({ content: 'An error occurred while processing your command. Please try again.' });
+      }
+    } catch (replyError) {
+      console.error('Error sending error response:', replyError);
     }
   }
 });

@@ -133,6 +133,10 @@ const commands = [
     description: 'Show the current AI channel for this server.'
   },
   {
+    name: 'listallai',
+    description: 'List all AI channels across servers (Admin only)'
+  },
+  {
     name: 'commands',
     description: 'List all supported commands.'
   },
