@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: blackfire-bot
+    env: node
+    plan: free
+    buildCommand: |
+      apt-get update && apt-get install -y espeak espeak-data
+      npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.x
+    autoDeploy: false
