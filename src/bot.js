@@ -1363,27 +1363,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Clear any previous ended timer in this channel
       endedTimers.delete(interaction.channel.id);
 
-      // Check if user has special roles
-      const supporterRoleId = '1363903344514564397';
-      const boosterRoleId = '1363559989909782548';
-      const hasSupporterRole = targetMember.roles.cache.has(supporterRoleId);
-      const hasBoosterRole = targetMember.roles.cache.has(boosterRoleId);
+      // Role IDs for perks
+      const supporterRoleId = '1404190721488982052';
+      const boosterRoleId = '1409655040326500603';
+      const donatorRoleId = '1404190721488982053';
+      const megaDonatorRoleId = '1404190721488982054';
 
-      // Set timer duration: 25 seconds for booster role, 20 seconds for supporter role, 15 seconds for everyone else
-      let timerDuration, timerDurationSeconds, roleBonus = '';
-      if (hasBoosterRole) {
-        timerDuration = 25000; // 25 seconds
-        timerDurationSeconds = 25;
-        roleBonus = ' (booster role bonus!)';
-      } else if (hasSupporterRole) {
-        timerDuration = 20000; // 20 seconds
-        timerDurationSeconds = 20;
-        roleBonus = ' (supporter role bonus!)';
-      } else {
-        timerDuration = 15000; // 15 seconds
-        timerDurationSeconds = 15;
+      // Calculate claim time
+      let claimTimeMs = 30000; // 30 seconds base
+      let bonusStrings = [];
+      if (targetMember.roles.cache.has(supporterRoleId)) {
+        claimTimeMs += 30000; // +30 seconds
+        bonusStrings.push('+30s (Supporter)');
+      }
+      if (targetMember.roles.cache.has(boosterRoleId)) {
+        claimTimeMs += 60000; // +1 minute
+        bonusStrings.push('+1m (Server Booster)');
+      }
+      if (targetMember.roles.cache.has(donatorRoleId)) {
+        claimTimeMs += 60000; // +1 minute
+        bonusStrings.push('+1m (Donator)');
+      }
+      if (targetMember.roles.cache.has(megaDonatorRoleId)) {
+        claimTimeMs += 600000; // +10 minutes
+        bonusStrings.push('+10m (Mega Donator)');
       }
 
+      const claimTimeSec = Math.floor(claimTimeMs / 1000);
+      const bonusText = bonusStrings.length > 0 ? ` | Bonuses: ${bonusStrings.join(', ')}` : '';
       const startTime = Date.now();
 
       // Create timeout for the timer
@@ -1399,18 +1406,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
         activeTimers.delete(interaction.channel.id);
         await interaction.followUp({ content: `⏰ Time's up for <@${targetUser.id}>!` });
-      }, timerDuration);
+      }, claimTimeMs);
 
       // Store the active timer
       activeTimers.set(interaction.channel.id, {
         userId: targetUser.id,
         startTime: startTime,
-        duration: timerDuration,
+        duration: claimTimeMs,
         timeout: timeout
       });
 
       await interaction.reply({
-        content: `⏱️ Timer started for <@${targetUser.id}>! Duration: ${timerDurationSeconds} seconds${roleBonus}`
+        content: `⏱️ Timer started for <@${targetUser.id}>! Duration: ${claimTimeSec} seconds${bonusText}`
       });
     }
 
