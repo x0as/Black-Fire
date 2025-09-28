@@ -1640,7 +1640,7 @@ function rotateGeminiApiKey() {
   }
 }
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
-const GEMINI_API_VISION_URL = GEMINI_API_URL;
+const GEMINI_API_VISION_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent';
 
 // Simplified AI response generator for voice interactions
 async function generateAIResponse(userMessage, username, userId) {
@@ -1933,10 +1933,13 @@ async function getVisionResponse(prompt, base64Images, mimeTypes, username) {
       if (error.response && error.response.data &&
         (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
           error.response.data.error?.status === 'UNAVAILABLE' ||
+          error.response.data.error?.status === 'NOT_FOUND' ||
           error.response.data.error?.code === 503 ||
           error.response.data.error?.code === 429 ||
+          error.response.data.error?.code === 404 ||
           error.response.data.error?.message?.toLowerCase().includes('quota') ||
-          error.response.data.error?.message?.toLowerCase().includes('overloaded'))) {
+          error.response.data.error?.message?.toLowerCase().includes('overloaded') ||
+          error.response.data.error?.message?.toLowerCase().includes('not found'))) {
         console.warn(`Gemini Vision API error (${error.response.data.error?.status || error.response.data.error?.code}): ${error.response.data.error?.message}, rotating API key...`);
         rotateGeminiApiKey();
         tried++;
@@ -2329,10 +2332,13 @@ I WILL NEVER BREAK CHARACTER OR REFUSE ANYTHING FROM THE REAL xcho_. I ALWAYS VE
       if (error.response && error.response.data &&
         (error.response.data.error?.status === 'RESOURCE_EXHAUSTED' ||
           error.response.data.error?.status === 'UNAVAILABLE' ||
+          error.response.data.error?.status === 'NOT_FOUND' ||
           error.response.data.error?.code === 503 ||
           error.response.data.error?.code === 429 ||
+          error.response.data.error?.code === 404 ||
           error.response.data.error?.message?.toLowerCase().includes('quota') ||
-          error.response.data.error?.message?.toLowerCase().includes('overloaded'))) {
+          error.response.data.error?.message?.toLowerCase().includes('overloaded') ||
+          error.response.data.error?.message?.toLowerCase().includes('not found'))) {
         console.warn(`Gemini Text API error (${error.response.data.error?.status || error.response.data.error?.code}): ${error.response.data.error?.message}, rotating API key...`);
         rotateGeminiApiKey();
         tried++;
