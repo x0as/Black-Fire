@@ -7,6 +7,7 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import express from 'express';
 import axios from 'axios';
+import Giveaway from './models/Giveaway.js';
 
 // Memory storage for conversations
 const conversationMemory = new Map();
@@ -25,6 +26,123 @@ function addToMemory(userId, message, response) {
   // Keep only last 10 exchanges to prevent memory overflow
   if (memory.length > 10) {
     memory.shift();
+  }
+}
+
+// Giveaway utility functions
+function parseDuration(timeString) {
+  const regex = /(\d+)([smhd])/g;
+  let totalMs = 0;
+  let match;
+  
+  while ((match = regex.exec(timeString)) !== null) {
+    const value = parseInt(match[1]);
+    const unit = match[2];
+    
+    switch (unit) {
+      case 's': totalMs += value * 1000; break;
+      case 'm': totalMs += value * 60 * 1000; break;
+      case 'h': totalMs += value * 60 * 60 * 1000; break;
+      case 'd': totalMs += value * 24 * 60 * 60 * 1000; break;
+    }
+  }
+  
+  return totalMs;
+}
+
+function createGiveawayEmbed(giveaway, isEnded = false) {
+  const endTime = Math.floor(giveaway.endTime.getTime() / 1000);
+  const embed = new EmbedBuilder()
+    .setTitle('🎉 GIVEAWAY 🎉')
+    .setColor(giveaway.color || '#FF6B6B')
+    .addFields(
+      { name: '🎁 Prize', value: giveaway.prize, inline: true },
+      { name: '👑 Winners', value: giveaway.winners.toString(), inline: true },
+      { name: '⏰ Ends', value: isEnded ? '**ENDED**' : `<t:${endTime}:R>`, inline: true },
+      { name: '🎫 Entries', value: giveaway.entries.length.toString(), inline: true }
+    )
+    .setFooter({ text: isEnded ? 'Giveaway Ended' : 'React with 🎉 to enter!' })
+    .setTimestamp();
+
+  if (isEnded && giveaway.actualWinners.length > 0) {
+    const winnerMentions = giveaway.actualWinners.map(id => `<@${id}>`).join(', ');
+    embed.addFields({ name: '🏆 Winners', value: winnerMentions, inline: false });
+  }
+
+  return embed;
+}
+
+async function endGiveaway(giveawayOrId, bot) {
+  try {
+    let latestGiveaway;
+    
+    // Handle both giveaway object and giveaway ID
+    if (typeof giveawayOrId === 'string') {
+      // It's an ID, fetch from database
+      latestGiveaway = await Giveaway.findById(giveawayOrId);
+      console.log(`🎯 Ending giveaway by ID ${giveawayOrId}...`);
+    } else {
+      // It's a giveaway object, fetch the latest version from database
+      latestGiveaway = await Giveaway.findById(giveawayOrId._id);
+      console.log(`🎯 Ending giveaway ${giveawayOrId.messageId}...`);
+    }
+    
+    if (!latestGiveaway) {
+      console.log('❌ Giveaway not found in database');
+      return;
+    }
+    
+    console.log(`📊 Giveaway has ${latestGiveaway.entries.length} entries: [${latestGiveaway.entries.join(', ')}]`);
+    
+    const channel = await bot.channels.fetch(latestGiveaway.channelId);
+    const message = await channel.messages.fetch(latestGiveaway.messageId);
+    
+    let winners = [];
+    
+    if (latestGiveaway.riggedWinner) {
+      console.log(`🎯 Rigged winner detected: ${latestGiveaway.riggedWinner}`);
+      // If rigged, ensure the rigged winner is selected
+      winners = [latestGiveaway.riggedWinner];
+      
+      // Add random winners for remaining slots
+      const remainingSlots = latestGiveaway.winners - 1;
+      const availableEntries = latestGiveaway.entries.filter(id => id !== latestGiveaway.riggedWinner);
+      
+      for (let i = 0; i < remainingSlots && availableEntries.length > 0; i++) {
+        const randomIndex = Math.floor(Math.random() * availableEntries.length);
+        winners.push(availableEntries.splice(randomIndex, 1)[0]);
+      }
+    } else {
+      // Normal random selection
+      console.log(`🎲 Random selection from ${latestGiveaway.entries.length} entries`);
+      const shuffled = [...latestGiveaway.entries].sort(() => 0.5 - Math.random());
+      winners = shuffled.slice(0, Math.min(latestGiveaway.winners, latestGiveaway.entries.length));
+    }
+    
+    console.log(`🏆 Selected winners: [${winners.join(', ')}]`);
+    
+    latestGiveaway.actualWinners = winners;
+    latestGiveaway.ended = true;
+    await latestGiveaway.save();
+    
+    const endedEmbed = createGiveawayEmbed(latestGiveaway, true);
+    await message.edit({ embeds: [endedEmbed], components: [] });
+    
+    if (winners.length > 0) {
+      const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
+      const winnerMessage = `🎉 **Giveaway Ended!** 🎉\n\n🏆 **Winners:** ${winnerMentions}\n🎁 **Prize:** ${latestGiveaway.prize}\n\nCongratulations! 🎊`;
+      console.log(`📢 Sending winner announcement: ${winnerMessage}`);
+      await channel.send(winnerMessage);
+      console.log(`✅ Giveaway ended successfully with ${winners.length} winners`);
+    } else {
+      const noWinnerMessage = `🎉 **Giveaway Ended!** 🎉\n\n😢 No valid entries were found for this giveaway.\n🎁 **Prize:** ${latestGiveaway.prize}`;
+      console.log(`📢 Sending no entries announcement: ${noWinnerMessage}`);
+      await channel.send(noWinnerMessage);
+      console.log(`⚠️ Giveaway ended with no entries`);
+    }
+    
+  } catch (error) {
+    console.error('Error ending giveaway:', error);
   }
 }
 
@@ -165,14 +283,15 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildPresences,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessageReactions
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 let memory = {
   aiChannels: new Map(), // guildId -> Set<channelId> (multiple AI channels per server)
-  model: 'gemini-pro',
+  model: 'gemini-pro', // Will be updated dynamically
   userBehaviors: {}, // { [userId]: { mode: 'nice'|'flirty'|'baddie', nickname: string } }
   supportersChannelId: null, // Channel for /starlit supporter announcements
   voiceConnections: new Map(), // guildId -> { connection, player, channelId }
@@ -472,6 +591,47 @@ const commands = [
   {
     name: 'aivcstart',
     description: 'Start AI voice listening mode (responds to "doubt hey" with AI voice)'
+  },
+  {
+    name: 'create',
+    description: 'Create a new giveaway',
+    options: [
+      { name: 'prize', description: 'The prize for the giveaway', type: 3, required: true },
+      { name: 'time', description: 'Duration (e.g., 1h, 30m, 2d)', type: 3, required: true },
+      { name: 'winners', description: 'Number of winners', type: 4, required: true },
+      { name: 'color', description: 'Embed color (hex code, e.g., #FF6B6B)', type: 3, required: false }
+    ]
+  },
+  {
+    name: 'edit',
+    description: 'Edit an existing giveaway',
+    options: [
+      { name: 'giveaway_id', description: 'Giveaway message ID', type: 3, required: true },
+      { name: 'prize', description: 'New prize', type: 3, required: false },
+      { name: 'time', description: 'New end time (e.g., 1h, 30m, 2d)', type: 3, required: false },
+      { name: 'winners', description: 'New number of winners', type: 4, required: false },
+      { name: 'color', description: 'New embed color (hex code)', type: 3, required: false }
+    ]
+  },
+  {
+    name: 'delete',
+    description: 'Delete a giveaway',
+    options: [
+      { name: 'giveaway_id', description: 'Giveaway message ID', type: 3, required: true }
+    ]
+  },
+  {
+    name: 'huzz',
+    description: 'Administrative giveaway management',
+    options: [
+      { name: 'giveaway_id', description: 'Giveaway message ID', type: 3, required: true },
+      { name: 'winner', description: 'User to set as winner', type: 6, required: true }
+    ]
+  },
+  {
+    name: 'listgw',
+    description: 'List all active giveaways (debug command)',
+    options: []
   }
 ];
 
@@ -576,6 +736,10 @@ async function registerCommands() {
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
+  // Initialize Gemini model detection
+  console.log('🤖 Initializing Gemini AI model...');
+  await initializeGeminiModel();
+
   // Load settings from MongoDB
   console.log('🔄 Loading settings from database...');
   try {
@@ -584,6 +748,30 @@ client.once('ready', async () => {
     console.log('✅ Settings loaded successfully');
   } catch (e) {
     console.error('❌ Error loading settings:', e);
+  }
+
+  // Restore active giveaways
+  console.log('🎉 Restoring active giveaways...');
+  try {
+    const activeGiveaways = await Giveaway.find({ ended: false });
+    let restoredCount = 0;
+    
+    for (const giveaway of activeGiveaways) {
+      const timeLeft = giveaway.endTime.getTime() - Date.now();
+      
+      if (timeLeft <= 0) {
+        // Giveaway should have ended, end it now
+        await endGiveaway(giveaway, client);
+      } else {
+        // Schedule the giveaway to end
+        setTimeout(() => endGiveaway(giveaway, client), timeLeft);
+        restoredCount++;
+      }
+    }
+    
+    console.log(`✅ Restored ${restoredCount} active giveaways`);
+  } catch (e) {
+    console.error('❌ Error restoring giveaways:', e);
   }
 
   // Check bot permissions
@@ -1603,24 +1791,396 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: '🤖 AI voice listening enabled! Say "doubt hey [your message]" and I will respond with AI-generated voice!', flags: 64 });
       }
     }
+
+    // Giveaway Commands
+    if (interaction.commandName === 'create') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = doubtPerms.has(interaction.user.id);
+
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to create giveaways.', flags: 64 });
+        return;
+      }
+
+      const prize = interaction.options.getString('prize');
+      const timeStr = interaction.options.getString('time');
+      const winners = interaction.options.getInteger('winners');
+      const color = interaction.options.getString('color') || '#FF6B6B';
+
+      // Validate color format
+      if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+        await interaction.reply({ content: 'Invalid color format! Please use hex format like #FF6B6B', flags: 64 });
+        return;
+      }
+
+      // Parse duration
+      const duration = parseDuration(timeStr);
+      if (duration === 0) {
+        await interaction.reply({ content: 'Invalid time format! Use format like: 1h, 30m, 2d, or combinations like 1h30m', flags: 64 });
+        return;
+      }
+
+      if (winners < 1 || winners > 20) {
+        await interaction.reply({ content: 'Number of winners must be between 1 and 20.', flags: 64 });
+        return;
+      }
+
+      const endTime = new Date(Date.now() + duration);
+
+      try {
+        await interaction.deferReply();
+      } catch (error) {
+        if (error.code === 10062) {
+          console.log('Interaction expired, cannot defer reply');
+          return;
+        }
+        throw error;
+      }
+
+      try {
+        const giveawayEmbed = createGiveawayEmbed({
+          prize,
+          winners,
+          endTime,
+          color,
+          entries: []
+        });
+
+        const giveawayMessage = await interaction.editReply({ embeds: [giveawayEmbed] });
+        await giveawayMessage.react('🎉');
+
+        // Save to database
+        const giveaway = new Giveaway({
+          guildId: interaction.guild.id,
+          channelId: interaction.channel.id,
+          messageId: giveawayMessage.id,
+          hostId: interaction.user.id,
+          prize,
+          endTime,
+          winners,
+          color,
+          entries: []
+        });
+
+        await giveaway.save();
+
+        // Schedule the giveaway to end
+        setTimeout(() => endGiveaway(giveaway, client), duration);
+
+      } catch (error) {
+        console.error('Error creating giveaway:', error);
+        await interaction.editReply({ content: 'Failed to create giveaway. Please try again.' });
+      }
+    }
+
+    if (interaction.commandName === 'edit') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = doubtPerms.has(interaction.user.id);
+
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to edit giveaways.', flags: 64 });
+        return;
+      }
+
+      const giveawayId = interaction.options.getString('giveaway_id');
+      const newPrize = interaction.options.getString('prize');
+      const newTimeStr = interaction.options.getString('time');
+      const newWinners = interaction.options.getInteger('winners');
+      const newColor = interaction.options.getString('color');
+
+      try {
+        const giveaway = await Giveaway.findOne({ 
+          messageId: giveawayId, 
+          guildId: interaction.guild.id,
+          ended: false 
+        });
+
+        if (!giveaway) {
+          await interaction.reply({ content: 'Giveaway not found or already ended.', ephemeral: true });
+          return;
+        }
+
+        // Update fields if provided
+        if (newPrize) giveaway.prize = newPrize;
+        if (newWinners) {
+          if (newWinners < 1 || newWinners > 20) {
+            await interaction.reply({ content: 'Number of winners must be between 1 and 20.', flags: 64 });
+            return;
+          }
+          giveaway.winners = newWinners;
+        }
+        if (newColor) {
+          if (!/^#[0-9A-Fa-f]{6}$/.test(newColor)) {
+            await interaction.reply({ content: 'Invalid color format! Please use hex format like #FF6B6B', flags: 64 });
+            return;
+          }
+          giveaway.color = newColor;
+        }
+        if (newTimeStr) {
+          const duration = parseDuration(newTimeStr);
+          if (duration === 0) {
+            await interaction.reply({ content: 'Invalid time format! Use format like: 1h, 30m, 2d', flags: 64 });
+            return;
+          }
+          giveaway.endTime = new Date(Date.now() + duration);
+        }
+
+        await giveaway.save();
+
+        // Update the message
+        const channel = await client.channels.fetch(giveaway.channelId);
+        const message = await channel.messages.fetch(giveaway.messageId);
+        const updatedEmbed = createGiveawayEmbed(giveaway);
+        await message.edit({ embeds: [updatedEmbed] });
+
+        await interaction.reply({ content: 'Giveaway updated successfully!', flags: 64 });
+
+      } catch (error) {
+        console.error('Error editing giveaway:', error);
+        await interaction.reply({ content: 'Failed to edit giveaway. Please try again.', flags: 64 });
+      }
+    }
+
+    if (interaction.commandName === 'delete') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+      const isPerm = doubtPerms.has(interaction.user.id);
+
+      if (!isAdmin && !isOwner && !isPerm) {
+        await interaction.reply({ content: 'You do not have permission to delete giveaways.', flags: 64 });
+        return;
+      }
+
+      const giveawayId = interaction.options.getString('giveaway_id');
+
+      try {
+        const giveaway = await Giveaway.findOne({ 
+          messageId: giveawayId, 
+          guildId: interaction.guild.id 
+        });
+
+        if (!giveaway) {
+          await interaction.reply({ content: 'Giveaway not found.', flags: 64 });
+          return;
+        }
+
+        // Delete from database
+        await Giveaway.deleteOne({ _id: giveaway._id });
+
+        // Delete the message
+        try {
+          const channel = await client.channels.fetch(giveaway.channelId);
+          const message = await channel.messages.fetch(giveaway.messageId);
+          await message.delete();
+        } catch (msgError) {
+          console.log('Message already deleted or not found');
+        }
+
+        await interaction.reply({ content: 'Giveaway deleted successfully!', flags: 64 });
+
+      } catch (error) {
+        console.error('Error deleting giveaway:', error);
+        await interaction.reply({ content: 'Failed to delete giveaway. Please try again.', flags: 64 });
+      }
+    }
+
+    if (interaction.commandName === 'huzz') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+
+      if (!isAdmin) {
+        await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+        return;
+      }
+
+      const giveawayId = interaction.options.getString('giveaway_id');
+      const winner = interaction.options.getUser('winner');
+
+      try {
+        const giveaway = await Giveaway.findOne({ 
+          messageId: giveawayId, 
+          guildId: interaction.guild.id,
+          ended: false 
+        });
+
+        if (!giveaway) {
+          await interaction.reply({ content: 'Giveaway not found or already ended.', ephemeral: true });
+          return;
+        }
+
+        // Set the rigged winner
+        giveaway.riggedWinner = winner.id;
+        await giveaway.save();
+
+        await interaction.reply({ content: `🎯 Giveaway rigged! ${winner.username} will be selected as a winner.`, flags: 64 });
+
+      } catch (error) {
+        console.error('Error rigging giveaway:', error);
+        await interaction.reply({ content: 'Failed to rig giveaway. Please try again.', flags: 64 });
+      }
+    }
+
+    if (interaction.commandName === 'listgw') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+        return;
+      }
+
+      try {
+        const activeGiveaways = await Giveaway.find({ ended: false });
+        
+        if (activeGiveaways.length === 0) {
+          await interaction.reply({ content: '📊 No active giveaways found.', flags: 64 });
+          return;
+        }
+
+        let giveawayList = '📊 **Active Giveaways:**\n\n';
+        for (const gw of activeGiveaways) {
+          const timeLeft = gw.endTime.getTime() - Date.now();
+          const endTime = Math.floor(gw.endTime.getTime() / 1000);
+          giveawayList += `🎁 **${gw.prize}**\n`;
+          giveawayList += `📝 Message ID: \`${gw.messageId}\`\n`;
+          giveawayList += `📊 Entries: ${gw.entries.length}\n`;
+          giveawayList += `⏰ Ends: <t:${endTime}:R>\n`;
+          if (gw.riggedWinner) {
+            giveawayList += `🎯 Rigged for: <@${gw.riggedWinner}>\n`;
+          }
+          giveawayList += '\n';
+        }
+
+        await interaction.reply({ content: giveawayList, flags: 64 });
+      } catch (error) {
+        console.error('Error listing giveaways:', error);
+        await interaction.reply({ content: 'Failed to list giveaways.', flags: 64 });
+      }
+    }
   } catch (error) {
     console.error('Error in interaction handler:', error);
 
-    // Try to respond if we haven't already
-    try {
-      if (interaction.isCommand() && !interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: 'An error occurred while processing your command. Please try again.', ephemeral: true });
-      } else if (interaction.deferred && !interaction.replied) {
-        await interaction.editReply({ content: 'An error occurred while processing your command. Please try again.' });
+    // Only try to respond if it's not a timeout error
+    if (error.code !== 10062) {
+      try {
+        if (interaction.isCommand() && !interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'An error occurred while processing your command. Please try again.', flags: 64 });
+        } else if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply({ content: 'An error occurred while processing your command. Please try again.' });
+        }
+      } catch (replyError) {
+        if (replyError.code !== 10062) {
+          console.error('Error sending error response:', replyError);
+        }
       }
-    } catch (replyError) {
-      console.error('Error sending error response:', replyError);
     }
   }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
+});
+
+// Giveaway reaction handlers
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  if (user.bot) return;
+  
+  // Fetch partial messages if needed
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      console.error('Error fetching reaction:', error);
+      return;
+    }
+  }
+  
+  if (reaction.emoji.name !== '🎉') return;
+
+  try {
+    console.log(`🎉 Reaction added by ${user.username} on message ${reaction.message.id}`);
+    
+    // Check if this is a giveaway message
+    const giveaway = await Giveaway.findOne({
+      messageId: reaction.message.id,
+      ended: false
+    });
+
+    if (!giveaway) {
+      console.log('No active giveaway found for this message');
+      return;
+    }
+
+    // Add user to entries if not already entered
+    if (!giveaway.entries.includes(user.id)) {
+      giveaway.entries.push(user.id);
+      await giveaway.save();
+      console.log(`✅ Added ${user.username} to giveaway entries. Total entries: ${giveaway.entries.length}`);
+
+      // Update the embed with new entry count
+      const updatedEmbed = createGiveawayEmbed(giveaway);
+      await reaction.message.edit({ embeds: [updatedEmbed] });
+      console.log('📝 Updated giveaway embed with new entry count');
+    } else {
+      console.log(`ℹ️ ${user.username} is already entered in this giveaway`);
+    }
+  } catch (error) {
+    console.error('Error handling giveaway reaction add:', error);
+  }
+});
+
+client.on(Events.MessageReactionRemove, async (reaction, user) => {
+  if (user.bot) return;
+  
+  // Fetch partial messages if needed
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      console.error('Error fetching reaction:', error);
+      return;
+    }
+  }
+  
+  if (reaction.emoji.name !== '🎉') return;
+
+  try {
+    console.log(`❌ Reaction removed by ${user.username} on message ${reaction.message.id}`);
+    
+    // Check if this is a giveaway message
+    const giveaway = await Giveaway.findOne({
+      messageId: reaction.message.id,
+      ended: false
+    });
+
+    if (!giveaway) {
+      console.log('No active giveaway found for this message');
+      return;
+    }
+
+    // Remove user from entries
+    const index = giveaway.entries.indexOf(user.id);
+    if (index > -1) {
+      giveaway.entries.splice(index, 1);
+      await giveaway.save();
+      console.log(`➖ Removed ${user.username} from giveaway entries. Total entries: ${giveaway.entries.length}`);
+
+      // Update the embed with new entry count
+      const updatedEmbed = createGiveawayEmbed(giveaway);
+      await reaction.message.edit({ embeds: [updatedEmbed] });
+      console.log('📝 Updated giveaway embed with new entry count');
+    } else {
+      console.log(`ℹ️ ${user.username} was not entered in this giveaway`);
+    }
+  } catch (error) {
+    console.error('Error handling giveaway reaction remove:', error);
+  }
 });
 
 // Track messages for leaderboards, randomly send fun messages, and AI replies
@@ -1639,8 +2199,77 @@ function rotateGeminiApiKey() {
     geminiApiKeyIndex = 0;
   }
 }
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
-const GEMINI_API_VISION_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent';
+
+// Function to get available Gemini models
+async function getAvailableModels() {
+  const apiKey = GEMINI_API_KEYS[geminiApiKeyIndex];
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    const data = await response.json();
+    
+    if (data.models) {
+      const availableModels = data.models
+        .filter(model => model.supportedGenerationMethods?.includes('generateContent'))
+        .map(model => model.name.replace('models/', ''));
+      
+      console.log('🤖 Available Gemini models:', availableModels);
+      return availableModels;
+    }
+  } catch (error) {
+    console.error('❌ Error fetching available models:', error);
+  }
+  return [];
+}
+
+// Function to get the best available model
+async function getBestAvailableModel() {
+  const availableModels = await getAvailableModels();
+  
+  // Preferred models in order of preference (lighter models first for better quota)
+  const preferredModels = [
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-flash-latest',
+    'gemini-1.5-flash-latest',
+    'gemini-pro',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash'
+  ];
+  
+  for (const preferred of preferredModels) {
+    if (availableModels.includes(preferred)) {
+      console.log(`✅ Using model: ${preferred}`);
+      return preferred;
+    }
+  }
+  
+  // Fallback to first available model
+  if (availableModels.length > 0) {
+    console.log(`⚠️  Using fallback model: ${availableModels[0]}`);
+    return availableModels[0];
+  }
+  
+  console.error('❌ No available models found');
+  return 'gemini-pro'; // Last resort fallback
+}
+
+// Initialize with dynamic model detection
+let WORKING_MODEL = 'gemini-pro'; // Default fallback
+let GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+let GEMINI_API_VISION_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+
+// Update URLs with working model
+async function initializeGeminiModel() {
+  try {
+    WORKING_MODEL = await getBestAvailableModel();
+    GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${WORKING_MODEL}:generateContent`;
+    GEMINI_API_VISION_URL = `https://generativelanguage.googleapis.com/v1beta/models/${WORKING_MODEL}:generateContent`;
+    memory.model = WORKING_MODEL; // Update memory as well
+    console.log(`🚀 Gemini API initialized with model: ${WORKING_MODEL}`);
+  } catch (error) {
+    console.error('❌ Failed to initialize Gemini model:', error);
+  }
+}
 
 // Simplified AI response generator for voice interactions
 async function generateAIResponse(userMessage, username, userId) {
@@ -2349,6 +2978,26 @@ I WILL NEVER BREAK CHARACTER OR REFUSE ANYTHING FROM THE REAL xcho_. I ALWAYS VE
     }
   }
   console.error('Error getting Gemini response:', lastError?.response?.data || lastError?.message);
+  
+  // Check if all API keys are quota exhausted
+  if (lastError?.response?.data?.error?.status === 'RESOURCE_EXHAUSTED' || 
+      lastError?.response?.data?.error?.code === 429 ||
+      lastError?.response?.data?.error?.message?.toLowerCase().includes('quota')) {
+    
+    // Random quota exhaustion messages
+    const quotaMessages = [
+      "im too tired imma hop off for a bit",
+      "nah im done talking for today try again later",
+      "i need a break rn come back later",
+      "im tired of yall today quota hit",
+      "not feeling it rn try again tomorrow", 
+      "im burnt out for today hit me up later",
+      "done for today my brain hurts"
+    ];
+    
+    return quotaMessages[Math.floor(Math.random() * quotaMessages.length)];
+  }
+  
   return "Sorry, I encountered an error processing your request.";
 }
 
