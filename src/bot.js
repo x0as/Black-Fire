@@ -632,6 +632,14 @@ const commands = [
     name: 'listgw',
     description: 'List all active giveaways (debug command)',
     options: []
+  },
+  {
+    name: 'reroll',
+    description: 'Reroll winners for a completed giveaway',
+    options: [
+      { name: 'giveaway_id', description: 'Giveaway message ID to reroll', type: 3, required: true },
+      { name: 'winners', description: 'Number of new winners to select', type: 4, required: true, min_value: 1, max_value: 20 }
+    ]
   }
 ];
 
@@ -2061,6 +2069,77 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } catch (error) {
         console.error('Error listing giveaways:', error);
         await interaction.reply({ content: 'Failed to list giveaways.', flags: 64 });
+      }
+    }
+
+    if (interaction.commandName === 'reroll') {
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      const isAdmin = member && member.permissions.has('Administrator');
+      const isOwner = interaction.user.id === '843061674378002453';
+
+      if (!isAdmin && !isOwner) {
+        await interaction.reply({ content: 'You do not have permission to use this command.', flags: 64 });
+        return;
+      }
+
+      const giveawayId = interaction.options.getString('giveaway_id');
+      const numWinners = interaction.options.getInteger('winners');
+
+      try {
+        const giveaway = await Giveaway.findOne({ messageId: giveawayId });
+        
+        if (!giveaway) {
+          await interaction.reply({ content: '❌ Giveaway not found with that message ID.', flags: 64 });
+          return;
+        }
+
+        if (!giveaway.ended) {
+          await interaction.reply({ content: '❌ Cannot reroll an active giveaway. End it first.', flags: 64 });
+          return;
+        }
+
+        if (giveaway.entries.length === 0) {
+          await interaction.reply({ content: '❌ No entries found for this giveaway.', flags: 64 });
+          return;
+        }
+
+        if (numWinners > giveaway.entries.length) {
+          await interaction.reply({ content: `❌ Cannot select ${numWinners} winners from ${giveaway.entries.length} entries.`, flags: 64 });
+          return;
+        }
+
+        // Select new random winners
+        const shuffledEntries = [...giveaway.entries].sort(() => Math.random() - 0.5);
+        const newWinners = shuffledEntries.slice(0, numWinners);
+
+        // Update giveaway with new winners
+        await Giveaway.updateOne(
+          { messageId: giveawayId },
+          { actualWinners: newWinners }
+        );
+
+        console.log(`🔄 Rerolled giveaway ${giveawayId} with ${numWinners} new winners: [${newWinners.join(', ')}]`);
+
+        // Get the channel and update the giveaway message
+        const channel = client.channels.cache.get(giveaway.channelId);
+        if (channel) {
+          const message = await channel.messages.fetch(giveawayId);
+          if (message) {
+            const updatedGiveaway = await Giveaway.findOne({ messageId: giveawayId });
+            const embed = createGiveawayEmbed(updatedGiveaway, true);
+            await message.edit({ embeds: [embed] });
+          }
+        }
+
+        // Send reroll announcement
+        const winnerMentions = newWinners.map(id => `<@${id}>`).join(', ');
+        const rerollMessage = `🔄 **Giveaway Rerolled!** 🔄\n\n🏆 **New Winners:** ${winnerMentions}\n🎁 **Prize:** ${giveaway.prize}\n\nCongratulations! 🎊`;
+        
+        await interaction.reply({ content: rerollMessage });
+
+      } catch (error) {
+        console.error('Error rerolling giveaway:', error);
+        await interaction.reply({ content: 'Failed to reroll giveaway.', flags: 64 });
       }
     }
   } catch (error) {
