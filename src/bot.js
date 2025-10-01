@@ -266,11 +266,59 @@ function generateDefaultBaddieModelResponse(userId, username, userEmotion = 'nor
 // Express web service for uptime monitoring
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.send('Discord bot is running!');
+  res.status(200).json({
+    status: 'online',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    bot: client.user ? `${client.user.tag} (${client.user.id})` : 'Not logged in',
+    guilds: client.guilds ? client.guilds.cache.size : 0,
+    memory: process.memoryUsage()
+  });
 });
+
+// Additional health check endpoints
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
 app.listen(PORT, () => {
   console.log(`Web service listening on port ${PORT}`);
+});
+
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  // Don't exit, just log the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, just log the error
+});
+
+process.on('warning', (warning) => {
+  console.warn('⚠️ Warning:', warning.message);
+});
+
+// Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('📡 SIGTERM received, shutting down gracefully...');
+  client.destroy();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('📡 SIGINT received, shutting down gracefully...');
+  client.destroy();
+  process.exit(0);
 });
 
 const TOKEN = process.env.BOT_TOKEN;
@@ -359,12 +407,73 @@ async function savePersona(userId, mode, nickname, gender) {
 }
 
 
-// MongoDB connection and schema
+// MongoDB connection and schema with retry logic
 const MONGO_URI = process.env.MONGO_URI;
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
-// Load Doubt perms after mongoose connects
-loadDoubtPerms();
+async function connectToMongoDB() {
+  const maxRetries = 5;
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      await mongoose.connect(MONGO_URI, { 
+        useNewUrlParser: true, 
+        useUnifiedTopology: true,
+        maxPoolSize: 10,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      });
+      console.log('✅ Connected to MongoDB');
+      break;
+    } catch (error) {
+      retries++;
+      console.error(`❌ MongoDB connection attempt ${retries} failed:`, error.message);
+      if (retries === maxRetries) {
+        console.error('🚨 All MongoDB connection attempts failed');
+        throw error;
+      }
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 2000 * retries));
+    }
+  }
+}
+
+// Handle MongoDB connection events
+mongoose.connection.on('error', (error) => {
+  console.error('🚨 MongoDB connection error:', error);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('📡 MongoDB disconnected, attempting to reconnect...');
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('✅ MongoDB reconnected');
+});
+
+// Initialize MongoDB connection
+connectToMongoDB().catch(error => {
+  console.error('🚨 Failed to connect to MongoDB:', error);
+  process.exit(1);
+});
+
+// Load Doubt perms after mongoose connects with error handling
+async function initializeBot() {
+  try {
+    await loadDoubtPerms();
+    console.log('✅ Loaded Doubt permissions');
+  } catch (error) {
+    console.error('❌ Failed to load Doubt permissions:', error);
+  }
+}
+
+// Call after MongoDB connection is established
+connectToMongoDB()
+  .then(() => initializeBot())
+  .catch(error => {
+    console.error('🚨 Failed to initialize bot:', error);
+    process.exit(1);
+  });
 
 // Settings schema for persistent bot configuration
 const settingsSchema = new mongoose.Schema({
@@ -743,6 +852,37 @@ async function registerCommands() {
 
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  
+  // Set up heartbeat monitoring and memory cleanup
+  setInterval(() => {
+    const memUsage = process.memoryUsage();
+    const uptime = Math.floor(process.uptime());
+    console.log(`💓 Bot heartbeat - Uptime: ${uptime}s, Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
+    
+    // Memory cleanup if usage gets too high
+    if (memUsage.heapUsed > 500 * 1024 * 1024) { // 500MB threshold
+      console.log('🧹 High memory usage detected, running cleanup...');
+      global.gc && global.gc(); // Force garbage collection if available
+      
+      // Clear old conversation memory
+      const cutoff = Date.now() - (24 * 60 * 60 * 1000); // 24 hours
+      for (const [userId, conversations] of conversationMemory) {
+        const filtered = conversations.filter(conv => conv.timestamp > cutoff);
+        if (filtered.length !== conversations.length) {
+          conversationMemory.set(userId, filtered);
+        }
+      }
+      
+      // Clear old deleted messages
+      for (const [channelId, messages] of deletedMessages) {
+        if (messages.length > 10) {
+          deletedMessages.set(channelId, messages.slice(-10));
+        }
+      }
+      
+      console.log('✅ Memory cleanup completed');
+    }
+  }, 300000); // Every 5 minutes
 
   // Initialize Gemini model detection
   console.log('🤖 Initializing Gemini AI model...');
@@ -3559,6 +3699,54 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
   }
 });
 
-// Login to Discord
-client.login(TOKEN);
+// Add Discord client error handlers
+client.on('error', (error) => {
+  console.error('🚨 Discord client error:', error);
+});
+
+client.on('warn', (warning) => {
+  console.warn('⚠️ Discord client warning:', warning);
+});
+
+client.on('disconnect', () => {
+  console.warn('📡 Discord client disconnected');
+});
+
+client.on('reconnecting', () => {
+  console.log('🔄 Discord client reconnecting...');
+});
+
+client.on('resume', () => {
+  console.log('✅ Discord client resumed connection');
+});
+
+// Auto-reconnect on disconnect
+client.on('shardDisconnect', (event, id) => {
+  console.warn(`📡 Shard ${id} disconnected (${event.code}): ${event.reason}`);
+});
+
+client.on('shardReconnecting', (id) => {
+  console.log(`🔄 Shard ${id} reconnecting...`);
+});
+
+// Login to Discord with retry logic
+async function loginWithRetry(retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await client.login(TOKEN);
+      console.log('✅ Successfully logged in to Discord');
+      return;
+    } catch (error) {
+      console.error(`❌ Login attempt ${i + 1} failed:`, error.message);
+      if (i === retries - 1) {
+        console.error('🚨 All login attempts failed, exiting...');
+        process.exit(1);
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+}
+
+loginWithRetry();
 

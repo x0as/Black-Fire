@@ -4,7 +4,9 @@
   "description": "Discord bot for AI chat, voice interaction, and moderation.",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js",
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "supervisor": "node start.js",
     "setup-tts": "bash scripts/install-tts.sh",
     "postinstall": "echo 'Run npm run setup-tts to install text-to-speech dependencies if needed'"
   },
