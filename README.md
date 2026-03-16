@@ -1,4 +1,4 @@
-```markdown
+
 # 🎤 Black-Fire Discord Bot — AI & Voice Features (40k+ Community)
 
 Black-Fire is a production-oriented Discord bot built **on request for a large Discord community (~40,000 members)**. It focuses on scalable server utilities (verification, roles, tracking), a configurable AI-style response system, and optional voice features (join/leave + text-to-speech) for interactive community experiences.
