@@ -225,5 +225,5 @@ npm start 2>&1 | tee bot.log
 
 ---
 
-**🌟 Built for large communities — reliable, configurable, and maintainable.**
+**🌟 Built for large communities by x0as(whozaifa) — reliable, configurable, and maintainable.**
 ```
