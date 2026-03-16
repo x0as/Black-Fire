@@ -1,38 +1,51 @@
-# 🎤 Black-Fire Discord Bot - Voice Features
+```markdown
+# 🎤 Black-Fire Discord Bot — AI & Voice Features (40k+ Community)
 
-A powerful Discord bot with AI personality system and voice capabilities, designed to bypass UAE Discord restrictions using GitHub Codespaces.
+Black-Fire is a production-oriented Discord bot built **on request for a large Discord community (~40,000 members)**. It focuses on scalable server utilities (verification, roles, tracking), a configurable AI-style response system, and optional voice features (join/leave + text-to-speech) for interactive community experiences.
+
+> This project is intended for legitimate server operations (community automation, moderation support, and engagement features). It does **not** promote or include guidance for bypassing local laws, ISP restrictions, or platform policies.
+
+---
 
 ## 🌟 Features
 
 ### Core Features
-- ✅ Multi-personality AI system (nice, flirty, baddie, ultra-obedient for xcho_)
-- ✅ Comprehensive user verification system
-- ✅ Supporters channel with automatic role assignment
-- ✅ Message tracking and leaderboards
+- ✅ **Configurable AI response profiles** (adjustable tone/preset “personalities” suitable for community use)
+- ✅ **User verification / onboarding flow** (helpful for large-server moderation)
+- ✅ **Supporter / subscriber automation** (role assignment based on configured rules)
+- ✅ **Message tracking + leaderboards** (engagement insights for community staff)
 
-### 🎵 Voice Features (NEW!)
-- 🎤 **Join/Leave Voice Channels** - `/vcjoin` and `/vcleave` commands
-- 🗣️ **Text-to-Speech** - `/vcsay` to make the bot speak in voice chat
-- 🔊 **Cross-platform TTS** - Windows SAPI, Linux espeak/festival
-- 🌐 **UAE Bypass** - Works in GitHub Codespaces to bypass Discord restrictions
+### 🎵 Voice Features
+- 🎤 **Join/Leave Voice Channels** — `/vcjoin` and `/vcleave`
+- 🗣️ **Text-to-Speech (TTS)** — `/vcsay` to speak text in voice chat
+- 🔊 **Cross-platform audio pipeline** — works with common OS tools (Windows + Linux/Mac via installed TTS engines)
+- 🎧 **Discord voice streaming** using Opus-compatible audio playback
 
-## 🚀 Quick Start (GitHub Codespaces)
+---
 
-### Method 1: Direct Codespace Creation
-1. Go to your [Black-Fire repository](https://github.com/x0as/Black-Fire)
-2. Click the green **"Code"** button
-3. Select **"Codespaces"** tab
-4. Click **"Create codespace on main"**
-5. Wait for the environment to set up automatically
+## 🚀 Quick Start (Recommended: Dev Container / Codespaces)
 
-### Method 2: Manual Setup
+This repo includes scripts and configuration that can be used with **GitHub Codespaces** (or any dev container-compatible environment) to standardize setup across machines—helpful when multiple maintainers contribute.
+
+### Method 1: Create a Codespace
+1. Open the repository on GitHub
+2. Click **Code**
+3. Open the **Codespaces** tab
+4. Click **Create codespace on main**
+5. Wait for the environment to finish initializing
+
+### Method 2: Manual Setup Script
 ```bash
-# The setup script will run automatically, but if needed:
+# The setup script may run automatically in some environments, but you can run it manually:
 ./scripts/setup-codespaces.sh
 ```
 
-### Environment Variables
+---
+
+## 🔐 Environment Variables
+
 Create a `.env` file in the root directory:
+
 ```env
 BOT_TOKEN=your_discord_bot_token
 CLIENT_ID=your_discord_client_id
@@ -46,90 +59,86 @@ PORT=3000
 npm start
 ```
 
-### Text-to-Speech Setup
-If you encounter TTS errors, install dependencies:
-```bash
-# Run the TTS setup script
-npm run setup-tts
-
-# Or manually install espeak (Linux/Mac)
-sudo apt install espeak espeak-data  # Ubuntu/Debian
-brew install espeak                  # macOS
-
-# Windows uses built-in SAPI (no setup needed)
-```
+---
 
 ## 🎤 Voice Commands
 
-| Command | Description | Permissions |
-|---------|-------------|-------------|
-| `/vcjoin [channel]` | Join a voice channel | Admin/Owner/Perms |
-| `/vcleave` | Leave current voice channel | Admin/Owner/Perms |
-| `/vcsay <text>` | Text-to-speech in voice chat | Admin/Owner/Perms |
+| Command | Description | Typical Permissions |
+|---------|-------------|---------------------|
+| `/vcjoin [channel]` | Join a voice channel | Admin/Moderator |
+| `/vcleave` | Leave current voice channel | Admin/Moderator |
+| `/vcsay <text>` | Text-to-speech in voice chat | Admin/Moderator |
 
 ### Voice Usage Examples
+```text
+/vcjoin
+/vcjoin #General Voice
+/vcsay Hello everyone!
+/vcleave
 ```
-/vcjoin                    # Join your current voice channel
-/vcjoin #General Voice     # Join specific voice channel
-/vcsay Hello everyone!     # Make bot speak in voice chat
-/vcleave                   # Leave voice channel
+
+---
+
+## 🗣️ Text-to-Speech Setup (Optional)
+
+If you encounter TTS errors, install dependencies:
+
+```bash
+# Run the TTS setup script (if included in package scripts)
+npm run setup-tts
 ```
 
-## 🌍 UAE Discord Restrictions Bypass
+Or install manually:
 
-### The Problem
-- Discord voice features are blocked in UAE
-- Local bot hosting can't connect to Discord voice servers
-- VPN solutions are unreliable for bots
+```bash
+# Linux
+sudo apt install espeak espeak-data  # Ubuntu/Debian
 
-### The Solution: GitHub Codespaces
-- ✅ Runs on GitHub's global infrastructure (US/EU servers)
-- ✅ Bypasses local network restrictions
-- ✅ Free tier available (120 hours/month)
-- ✅ Full Linux environment with audio support
-- ✅ Persistent storage for bot data
+# macOS
+brew install espeak
 
-### Why This Works
-1. **Server Location**: Codespaces run in regions where Discord isn't blocked
-2. **Network Freedom**: GitHub's infrastructure has unrestricted internet access
-3. **Audio Support**: Linux environment with full audio stack (FFmpeg, espeak, etc.)
-4. **Always Online**: Can run 24/7 (within usage limits)
+# Windows: typically uses built-in speech components (no extra setup needed)
+```
+
+---
 
 ## 🛠️ Technical Details
 
 ### Voice Technology Stack
-- **Discord.js Voice**: Official Discord voice library
-- **FFmpeg**: Audio processing and format conversion
-- **Text-to-Speech Engines**:
-  - Windows: SAPI (System.Speech.Synthesis)
-  - Linux: espeak, festival
-- **Audio Encoding**: Opus codec for Discord compatibility
+- **Discord.js Voice**: voice connections + audio playback
+- **FFmpeg**: audio processing and conversion
+- **Text-to-Speech Engines** (depends on OS / installation)
+  - Windows: system speech components
+  - Linux/macOS: common CLI TTS engines (e.g., `espeak`; others optional)
+- **Audio Encoding**: Opus-compatible pipeline for Discord
 
 ### File Structure
-```
+```text
 src/
-├── bot.js              # Main bot file with voice commands
+├── bot.js              # Main bot file with voice commands and core logic
 ├── utils/
 │   └── tts.js          # Text-to-speech utilities
 scripts/
-└── setup-codespaces.sh # Codespaces setup script
+└── setup-codespaces.sh # Dev environment setup helper
 .devcontainer/
-└── devcontainer.json   # Codespaces configuration
-temp/                   # Temporary TTS audio files
+└── devcontainer.json   # Dev container configuration
+temp/                   # Temporary TTS audio files (if used)
 ```
 
 ### Voice Command Flow
 1. User runs `/vcsay "Hello world"`
 2. Bot validates permissions and voice connection
-3. Text is cleaned (remove mentions, emojis, etc.)
-4. TTS engine generates WAV file
-5. FFmpeg processes audio for Discord
-6. Audio is streamed to voice channel
+3. Input text is sanitized (e.g., reduce noise from mentions/emojis)
+4. TTS engine generates audio
+5. FFmpeg prepares audio for streaming
+6. Audio is played in the voice channel
 7. Temporary files are cleaned up
+
+---
 
 ## 🔧 Development
 
-### Local Development (Non-UAE)
+### Local Development
 ```bash
 git clone https://github.com/x0as/Black-Fire.git
 cd Black-Fire
@@ -139,46 +148,45 @@ npm start
 ```
 
 ### Adding New Voice Features
-1. Add command to `commands` array in `bot.js`
-2. Implement handler in voice commands section
-3. Test TTS functionality with different text types
-4. Ensure proper cleanup of audio files
+1. Add the command definition where commands are registered
+2. Implement the handler logic in the voice commands section
+3. Test with various text inputs and edge cases
+4. Ensure audio/temp-file cleanup paths are correct
 
 ### TTS Customization
 Edit `src/utils/tts.js` to:
-- Add new TTS engines
-- Modify voice settings
-- Change audio quality
-- Add voice selection
+- add/adjust engines
+- tune voice settings
+- control output format/quality
+- implement voice selection
+
+---
 
 ## 📱 Deployment Options
 
-### Option 1: GitHub Codespaces (Recommended for UAE)
-- ✅ Bypasses restrictions
-- ✅ Zero local setup
-- ✅ Cloud-based
-- ❌ Limited free hours
+### Option 1: Dev Container / Codespaces (Convenient for Contributors)
+- ✅ Consistent environment across machines
+- ✅ Fast onboarding for new maintainers
+- ❌ Limited free usage (depending on your GitHub plan)
 
-### Option 2: VPS/Cloud Server
-- ✅ Full control
-- ✅ 24/7 uptime
-- ❌ Requires server management
-- ❌ May be blocked in UAE
+### Option 2: VPS / Cloud Server
+- ✅ 24/7 uptime and more control
+- ❌ Requires server management and monitoring
 
-### Option 3: Local Hosting (Not for UAE)
-- ✅ Free
-- ✅ Full control
-- ❌ Blocked in UAE
-- ❌ Requires local setup
+### Option 3: Local Hosting
+- ✅ Simple and free for small testing
+- ❌ Not ideal for always-on production
+
+---
 
 ## 🆘 Troubleshooting
 
-### Voice Issues
+### Voice Diagnostics
 ```bash
-# Check audio system
+# Check audio system (Linux)
 aplay -l
 
-# Test espeak
+# Test espeak (Linux/macOS if installed)
 espeak "test"
 
 # Check FFmpeg
@@ -189,27 +197,25 @@ npm start 2>&1 | tee bot.log
 ```
 
 ### Common Errors
-1. **"Failed to join voice channel"** - Check bot permissions
-2. **"TTS generation failed"** - Verify audio dependencies
-3. **"No voice connection"** - Run `/vcjoin` first
-4. **"Permission denied"** - Check command permissions
-5. **"festival: not found"** - Install TTS dependencies with `npm run setup-tts`
-6. **"espeak: command not found"** - Run `sudo apt install espeak espeak-data`
+1. **"Failed to join voice channel"** — confirm bot permissions + channel permissions
+2. **"TTS generation failed"** — install TTS dependencies and verify binary availability
+3. **"No voice connection"** — run `/vcjoin` first
+4. **"Permission denied"** — check command permission gating and role config
+5. **"espeak: command not found"** — install `espeak` and `espeak-data`
 
-### UAE-Specific Issues
-1. **Local testing fails** - Expected, use Codespaces
-2. **Voice features don't work locally** - Use cloud environment
-3. **Connection timeouts** - Switch to Codespaces
+---
 
 ## 📞 Support
 
-- **Repository**: [Black-Fire](https://github.com/x0as/Black-Fire)
-- **Issues**: Create GitHub issue for bugs
-- **Discord**: Test voice features in your server
+- **Repository**: Black-Fire
+- **Issues**: open a GitHub issue for bugs / feature requests
+- **Server context**: built for a large community (~40k members), so performance and moderation workflows matter
+
+---
 
 ## 🎯 Future Features
 
-- [ ] AI voice responses (connect Gemini to TTS)
+- [ ] AI voice responses (optional: connect AI output to TTS)
 - [ ] Voice activity detection
 - [ ] Music playback capabilities
 - [ ] Voice message transcription
@@ -219,4 +225,5 @@ npm start 2>&1 | tee bot.log
 
 ---
 
-**🌟 Enjoy your unrestricted Discord bot with voice features!**
+**🌟 Built for large communities — reliable, configurable, and maintainable.**
+```
