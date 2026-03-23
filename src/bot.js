@@ -391,12 +391,13 @@ const Persona = mongoose.model('Persona', personaSchema);
 
 // Load all personas into memory.userBehaviors on startup
 async function loadPersonasToMemory() {
-  const personas = await Persona.find({});
+  const personas = await Persona.find({}).lean();
+  memory.userBehaviors = {};
   for (const p of personas) {
     memory.userBehaviors[p.userId] = { mode: p.mode, nickname: p.nickname, gender: p.gender };
   }
+  console.log(`✅ Loaded ${personas.length} personas from MongoDB`);
 }
-loadPersonasToMemory();
 
 // Save or update a persona in MongoDB
 async function savePersona(userId, mode, nickname, gender) {
@@ -405,6 +406,27 @@ async function savePersona(userId, mode, nickname, gender) {
     { mode, nickname, gender },
     { upsert: true }
   );
+}
+
+// Use cache first, then MongoDB fallback to avoid persona misses after restart/deploy.
+async function getPersonaForUser(userId) {
+  const cached = memory.userBehaviors[userId];
+  if (cached && cached.mode && cached.nickname) {
+    return cached;
+  }
+
+  const dbPersona = await Persona.findOne({ userId }).lean();
+  if (!dbPersona) {
+    return null;
+  }
+
+  const normalized = {
+    mode: dbPersona.mode,
+    nickname: dbPersona.nickname,
+    gender: dbPersona.gender
+  };
+  memory.userBehaviors[userId] = normalized;
+  return normalized;
 }
 
 
@@ -452,20 +474,16 @@ mongoose.connection.on('reconnected', () => {
   console.log('✅ MongoDB reconnected');
 });
 
-// Initialize MongoDB connection
-connectToMongoDB().catch(error => {
-  console.error('🚨 Failed to connect to MongoDB:', error);
-  process.exit(1);
-});
-
 // Load Doubt perms after mongoose connects with error handling
 async function initializeBot() {
   try {
     await loadDoubtPerms();
     console.log('✅ Loaded Doubt permissions');
-    console.log('🔧 DEBUG: initializeBot completed, about to login...');
+    await migrateLegacyPersonasFromSettings();
+    await loadPersonasToMemory();
   } catch (error) {
-    console.error('❌ Failed to load Doubt permissions:', error);
+    console.error('❌ Failed to initialize Mongo-backed data:', error);
+    throw error;
   }
 }
 
@@ -505,6 +523,49 @@ async function setSetting(key, value) {
     console.log(`✅ Saved setting ${key} = ${value}`);
   } catch (e) {
     console.error(`Error setting ${key}:`, e);
+  }
+}
+
+async function migrateLegacyPersonasFromSettings() {
+  try {
+    let migratedCount = 0;
+
+    const legacyPersonaRows = await Settings.find({ key: { $regex: /^persona_/ } }).lean();
+    for (const row of legacyPersonaRows) {
+      const userId = row.key.replace('persona_', '').trim();
+      const value = row.value;
+
+      if (!userId || !value || typeof value !== 'object') {
+        continue;
+      }
+      if (!['nice', 'flirty', 'baddie'].includes(value.mode) || !value.nickname) {
+        continue;
+      }
+
+      await savePersona(userId, value.mode, value.nickname, value.gender || 'unspecified');
+      migratedCount++;
+    }
+
+    const legacyBulk = await Settings.findOne({ key: 'userBehaviors' }).lean();
+    if (legacyBulk && legacyBulk.value && typeof legacyBulk.value === 'object') {
+      for (const [userId, value] of Object.entries(legacyBulk.value)) {
+        if (!value || typeof value !== 'object') {
+          continue;
+        }
+        if (!['nice', 'flirty', 'baddie'].includes(value.mode) || !value.nickname) {
+          continue;
+        }
+
+        await savePersona(userId, value.mode, value.nickname, value.gender || 'unspecified');
+        migratedCount++;
+      }
+    }
+
+    if (migratedCount > 0) {
+      console.log(`✅ Migrated ${migratedCount} legacy persona records into Persona collection`);
+    }
+  } catch (error) {
+    console.error('❌ Legacy persona migration failed:', error);
   }
 }
 
@@ -2894,7 +2955,7 @@ async function getTextResponse(prompt, channelId, username, userId) {
 
   let systemPrompt;
   // 🔐 TRIPLE PERSONA VERIFICATION - CHECK EVERY SINGLE TIME 🔐
-  let behavior = memory.userBehaviors[userId];
+  let behavior = await getPersonaForUser(userId);
 
   // 🚨 ENHANCED PERSONA SECURITY PROTOCOL 🚨
   console.log(`🔍 PERSONA VERIFICATION STEP 1: Checking database for user ID "${userId}"`);
@@ -3445,7 +3506,7 @@ client.on(Events.MessageCreate, async (message) => {
     console.log(`⚡ VERIFICATION: This conversation is EXCLUSIVELY with user ID "${userId}" - NEVER confuse with others`);
     
     // Double-check persona assignment to prevent confusion
-    const currentBehavior = memory.userBehaviors[userId];
+    const currentBehavior = await getPersonaForUser(userId);
     if (currentBehavior) {
       console.log(`✅ PERSONA CONFIRMED: User ID "${userId}" has "${currentBehavior.mode}" persona with nickname "${currentBehavior.nickname}"`);
       console.log(`🔒 ANTI-CONFUSION: This persona belongs ONLY to user ID "${userId}" and NO OTHER USER`);
