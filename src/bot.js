@@ -462,6 +462,7 @@ async function initializeBot() {
   try {
     await loadDoubtPerms();
     console.log('✅ Loaded Doubt permissions');
+    console.log('🔧 DEBUG: initializeBot completed, about to login...');
   } catch (error) {
     console.error('❌ Failed to load Doubt permissions:', error);
   }
@@ -3767,8 +3768,10 @@ client.on('shardReconnecting', (id) => {
 
 // Login to Discord with retry logic
 async function loginWithRetry(retries = 5) {
+  console.log('🔧 DEBUG: loginWithRetry() called');
   for (let i = 0; i < retries; i++) {
     try {
+      console.log(`🔧 DEBUG: Attempting login (attempt ${i + 1}/${retries}), TOKEN length: ${TOKEN ? TOKEN.length : 'undefined'}`);
       await client.login(TOKEN);
       console.log('✅ Successfully logged in to Discord');
       return;
@@ -3784,5 +3787,8 @@ async function loginWithRetry(retries = 5) {
   }
 }
 
+console.log('🔧 DEBUG: About to call loginWithRetry()');
 loginWithRetry();
+console.log('🔧 DEBUG: loginWithRetry() function called (async, will continue in background)');
+
 
