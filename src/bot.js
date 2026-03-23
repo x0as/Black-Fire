@@ -10,6 +10,34 @@ import { OpenRouter } from '@openrouter/sdk';
 import Giveaway from './models/Giveaway.js';
 
 // Memory storage for conversations
+// START EXPRESS SERVER IMMEDIATELY (before any async operations)
+// This prevents Render health checks from timing out during startup
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'online',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    bot: 'Discord bot starting up...'
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`✅ Web service listening on port ${PORT}`);
+});
+
+// Memory storage for conversations
 const conversationMemory = new Map();
 
 function getUserConversationMemory(userId) {
@@ -264,33 +292,6 @@ function generateDefaultBaddieModelResponse(userId, username, userEmotion = 'nor
 }
 
 // Express web service for uptime monitoring
-const app = express();
-const PORT = process.env.PORT || 3001;
-
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.status(200).json({
-    status: 'online',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    bot: client.user ? `${client.user.tag} (${client.user.id})` : 'Not logged in',
-    guilds: client.guilds ? client.guilds.cache.size : 0,
-    memory: process.memoryUsage()
-  });
-});
-
-// Additional health check endpoints
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
-});
-
-app.get('/ping', (req, res) => {
-  res.status(200).send('pong');
-});
-
-app.listen(PORT, () => {
-  console.log(`Web service listening on port ${PORT}`);
-});
 
 // Global error handlers to prevent crashes
 process.on('uncaughtException', (error) => {
